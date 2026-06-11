@@ -6,7 +6,7 @@ import { createMonsterFromTemplate } from '../data/monsters';
 import { SYNERGY_SKILLS } from '../data/pets';
 import { getDiscoveryById } from '../data/discoveries';
 import { getItemById } from '../data/items';
-import { RESOURCE_NAMES, RESOURCE_EMOJIS, PET_TYPE_COLORS, PET_TYPE_NAMES } from '../utils/formatters';
+import { RESOURCE_NAMES, RESOURCE_EMOJIS, PET_TYPE_COLORS, PET_TYPE_NAMES, RARITY_NAMES, RARITY_COLORS } from '../utils/formatters';
 import { cn } from '../lib/utils';
 import type { Pet, Monster, ResourceReward, PetType } from '../types';
 
@@ -83,7 +83,7 @@ export default function Battle() {
   const [hasFinalized, setHasFinalized] = useState(false);
   const [battleRecordId, setBattleRecordId] = useState<string | undefined>(undefined);
   const [useLuckyCharm, setUseLuckyCharm] = useState(false);
-  const [itemsGained, setItemsGained] = useState<string[]>([]);
+  const [itemsGained, setItemsGained] = useState<{ itemId: string; amount: number }[]>([]);
 
   const logEndRef = useRef<HTMLDivElement>(null);
   const battleTimer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -594,14 +594,17 @@ export default function Battle() {
 
           {isPlayerWin && (
             <div className="mb-6 md:mb-8">
-              <div className="flex items-center justify-center gap-3 mb-4">
+              <div className="flex items-center justify-center gap-3 mb-4 flex-wrap">
                 <h3 className="font-title text-2xl md:text-3xl text-amber-300">
                   🎁 战利品
                 </h3>
                 {battleRecordId && (
-                  <span className="text-xs font-game text-emerald-300 bg-emerald-500/20 px-2.5 py-1 rounded-lg border border-emerald-400/30">
+                  <button
+                    onClick={() => navigate(`/collection?tab=adventures&record=${battleRecordId}&from=battle`)}
+                    className="text-xs font-game text-emerald-300 bg-emerald-500/20 px-2.5 py-1 rounded-lg border border-emerald-400/30 hover:bg-emerald-500/30 hover:text-emerald-200 transition-all underline underline-offset-2 cursor-pointer"
+                  >
                     📖 冒险记录已生成
-                  </span>
+                  </button>
                 )}
                 {usedLuckyCharmInBattle && (
                   <span className="text-xs font-game text-green-300 bg-green-500/20 px-2.5 py-1 rounded-lg border border-green-400/30">
@@ -611,50 +614,59 @@ export default function Battle() {
               </div>
 
               {rewards.resources.length > 0 && (
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4 max-w-2xl mx-auto">
-                  {rewards.resources.map((r: ResourceReward, idx: number) => (
-                    <div
-                      key={idx}
-                      className="p-3 md:p-4 rounded-xl bg-gradient-to-br from-amber-500/20 to-yellow-500/10 border border-amber-400/40 reward-pop"
-                      style={{ animationDelay: `${idx * 100}ms` }}
-                    >
-                      <div className="text-2xl md:text-3xl mb-1">
-                        {RESOURCE_EMOJIS[r.type] || '📦'}
+                <div className="mb-4">
+                  <h4 className="font-title text-sm md:text-base text-amber-200/80 mb-2 text-center">💰 获得资源</h4>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 max-w-2xl mx-auto">
+                    {rewards.resources.map((r: ResourceReward, idx: number) => (
+                      <div
+                        key={idx}
+                        className="p-3 md:p-4 rounded-xl bg-gradient-to-br from-amber-500/20 to-yellow-500/10 border border-amber-400/40 reward-pop"
+                        style={{ animationDelay: `${idx * 100}ms` }}
+                      >
+                        <div className="text-2xl md:text-3xl mb-1">
+                          {RESOURCE_EMOJIS[r.type] || '📦'}
+                        </div>
+                        <p className="text-white/80 text-xs md:text-sm font-game">
+                          {RESOURCE_NAMES[r.type]}
+                        </p>
+                        <p className="text-amber-300 font-title text-lg md:text-xl">
+                          +{r.amount}
+                        </p>
                       </div>
-                      <p className="text-white/80 text-xs md:text-sm font-game">
-                        {RESOURCE_NAMES[r.type]}
-                      </p>
-                      <p className="text-amber-300 font-title text-lg md:text-xl">
-                        +{r.amount}
-                      </p>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
               )}
 
               {itemsGained.length > 0 && (
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4 max-w-2xl mx-auto">
-                  {itemsGained.map((itemId, idx) => {
-                    const item = getItemById(itemId);
-                    if (!item) return null;
-                    return (
-                      <div
-                        key={`${itemId}-${idx}`}
-                        className="p-3 md:p-4 rounded-xl bg-gradient-to-br from-blue-500/20 to-indigo-500/10 border border-blue-400/40 reward-pop"
-                        style={{ animationDelay: `${(rewards.resources.length + idx) * 100}ms` }}
-                      >
-                        <div className="text-2xl md:text-3xl mb-1">
-                          {item.emoji}
+                <div className="mb-4">
+                  <h4 className="font-title text-sm md:text-base text-blue-200/80 mb-2 text-center">🔧 获得工具</h4>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 max-w-2xl mx-auto">
+                    {itemsGained.map(({ itemId, amount }, idx) => {
+                      const item = getItemById(itemId);
+                      if (!item) return null;
+                      return (
+                        <div
+                          key={`${itemId}-${idx}`}
+                          className="p-3 md:p-4 rounded-xl bg-gradient-to-br from-blue-500/20 to-indigo-500/10 border border-blue-400/40 reward-pop"
+                          style={{ animationDelay: `${(rewards.resources.length + idx) * 100}ms` }}
+                        >
+                          <div className="text-2xl md:text-3xl mb-1">
+                            {item.emoji}
+                          </div>
+                          <p className="text-white/80 text-xs md:text-sm font-game">
+                            {item.name}
+                          </p>
+                          <p className="text-blue-300 font-title text-lg md:text-xl">
+                            ×{amount}
+                          </p>
+                          <p className={cn('text-[10px] md:text-xs font-game mt-1 px-1.5 py-0.5 rounded inline-block', RARITY_COLORS[item.rarity], 'bg-white/10')}>
+                            {RARITY_NAMES[item.rarity]}
+                          </p>
                         </div>
-                        <p className="text-white/80 text-xs md:text-sm font-game">
-                          {item.name}
-                        </p>
-                        <p className="text-blue-300 font-title text-lg md:text-xl">
-                          +1
-                        </p>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
+                  </div>
                 </div>
               )}
 
@@ -693,9 +705,20 @@ export default function Battle() {
                               <p className="text-purple-300 text-xs font-game">[{discovery.rarity}]</p>
                             </div>
                           </div>
-                          <span className="text-[9px] font-game text-amber-300/80 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-400/20">
-                            来自本次战斗
-                          </span>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[9px] font-game text-amber-300/80 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-400/20">
+                              来自本次战斗
+                            </span>
+                            {battleRecordId && (
+                              <button
+                                onClick={() => navigate(`/collection?tab=adventures&record=${battleRecordId}&from=battle`)}
+                                className="text-[9px] font-game text-emerald-300/80 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-400/20 hover:bg-emerald-500/20 hover:text-emerald-200 transition-colors cursor-pointer"
+                                title="查看来源冒险"
+                              >
+                                🔗 来源
+                              </button>
+                            )}
+                          </div>
                         </div>
                       );
                     })}
@@ -743,7 +766,7 @@ export default function Battle() {
                       <div>
                         <span className="text-white/60">获得工具：</span>
                         <div className="flex flex-wrap gap-1.5 mt-1">
-                          {itemsGained.map((itemId, idx) => {
+                          {itemsGained.map(({ itemId, amount }, idx) => {
                             const item = getItemById(itemId);
                             if (!item) return null;
                             return (
@@ -751,7 +774,10 @@ export default function Battle() {
                                 key={`${itemId}-${idx}`}
                                 className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-blue-500/20 text-blue-300 border border-blue-400/30"
                               >
-                                {item.emoji} {item.name}
+                                {item.emoji} {item.name} ×{amount}
+                                <span className={cn('ml-1 px-1 rounded text-[9px]', RARITY_COLORS[item.rarity], 'bg-white/10')}>
+                                  {RARITY_NAMES[item.rarity]}
+                                </span>
                               </span>
                             );
                           })}
@@ -788,11 +814,32 @@ export default function Battle() {
                   </div>
 
                   <button
-                    onClick={() => navigate(`/collection?tab=adventures&record=${battleRecordId}`)}
-                    className="mt-3 w-full py-2 rounded-lg bg-emerald-500/20 border border-emerald-400/30 text-emerald-300 text-sm font-game hover:bg-emerald-500/30 transition-all"
+                    onClick={() => navigate(`/collection?tab=adventures&record=${battleRecordId}&from=battle`)}
+                    className="mt-3 w-full py-2 rounded-lg bg-emerald-500/20 border border-emerald-400/30 text-emerald-300 text-sm font-game hover:bg-emerald-500/30 transition-all cursor-pointer"
                   >
                     📖 查看完整记录
                   </button>
+                </div>
+              )}
+
+              {itemsGained.length > 0 && (
+                <div className="mt-4 p-3 rounded-xl bg-blue-500/10 border border-blue-400/20 max-w-2xl mx-auto">
+                  <p className="text-blue-200/90 font-game text-xs md:text-sm mb-2 text-center">🔧 工具获得日志</p>
+                  <div className="flex flex-wrap justify-center gap-1.5">
+                    {itemsGained.map(({ itemId, amount }, idx) => {
+                      const item = getItemById(itemId);
+                      if (!item) return null;
+                      return (
+                        <span
+                          key={`log-${itemId}-${idx}`}
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs md:text-sm font-game bg-blue-500/20 text-blue-200 border border-blue-400/30 animate-fadeIn"
+                          style={{ animationDelay: `${idx * 80}ms` }}
+                        >
+                          获得 {item.emoji} {item.name} ×{amount}
+                        </span>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
             </div>

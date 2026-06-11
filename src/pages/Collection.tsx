@@ -119,8 +119,7 @@ const NODE_TYPE_TITLE_COLORS: Record<string, string> = {
 export default function Collection() {
   const { pets, islandProgress, logs, discoveries, adventureRecords, checkAndUnlockIslands, getDiscoverySource, getAdventureRecordById } = useGameStore();
   const [searchParams, setSearchParams] = useSearchParams();
-  const initialTab = (searchParams.get('tab') as TabType) || 'bonds';
-  const [activeTab, setActiveTab] = useState<TabType>(initialTab);
+  const [activeTab, setActiveTab] = useState<TabType>('bonds');
   const [discoveryViewMode, setDiscoveryViewMode] = useState<DiscoveryViewMode>('all');
   const [rarityFilter, setRarityFilter] = useState<RarityFilter>('all');
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>('all');
@@ -133,6 +132,7 @@ export default function Collection() {
   const [expandedRecordId, setExpandedRecordId] = useState<string | null>(null);
   const logContainerRef = useRef<HTMLDivElement>(null);
   const adventureContainerRef = useRef<HTMLDivElement>(null);
+  const cleanupRecordTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const jumpToRecord = useCallback((recordId: string, from: string = 'discovery') => {
     setSearchParams(
@@ -141,9 +141,9 @@ export default function Collection() {
     );
   }, [setSearchParams]);
 
-  const jumpToDiscovery = useCallback((discoveryId: string) => {
+  const jumpToDiscovery = useCallback((discoveryId: string, from: string = 'adventure') => {
     setSearchParams(
-      { tab: 'discoveries', sel: discoveryId },
+      { tab: 'discoveries', sel: discoveryId, from },
       { replace: false }
     );
   }, [setSearchParams]);
@@ -161,6 +161,10 @@ export default function Collection() {
     if (recordParam) {
       setActiveTab('adventures');
       setAdventureFilter('all');
+      if (cleanupRecordTimeout.current) {
+        clearTimeout(cleanupRecordTimeout.current);
+        cleanupRecordTimeout.current = null;
+      }
       setHighlightedRecordId(recordParam);
       if (expandParam !== '0') {
         setExpandedRecordId(recordParam);
@@ -171,6 +175,10 @@ export default function Collection() {
           el.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
       }, 150);
+      cleanupRecordTimeout.current = setTimeout(() => {
+        setHighlightedRecordId(null);
+        setSearchParams(new URLSearchParams({ tab: activeTab }), { replace: true });
+      }, 3000);
     }
 
     if (selParam) {
@@ -185,24 +193,16 @@ export default function Collection() {
         }, 100);
       }
     }
-  }, [searchParams, discoveries]);
+  }, [searchParams, discoveries, activeTab, setSearchParams]);
 
   useEffect(() => {
-    if (highlightedRecordId) {
-      const timer = setTimeout(() => {
-        setHighlightedRecordId(null);
-        const currentRecord = searchParams.get('record');
-        if (currentRecord === highlightedRecordId) {
-          const newParams = new URLSearchParams(searchParams);
-          newParams.delete('record');
-          newParams.delete('expand');
-          newParams.delete('from');
-          setSearchParams(newParams, { replace: true });
-        }
-      }, 3000);
-      return () => clearTimeout(timer);
-    }
-  }, [highlightedRecordId, searchParams, setSearchParams]);
+    return () => {
+      if (cleanupRecordTimeout.current) {
+        clearTimeout(cleanupRecordTimeout.current);
+        cleanupRecordTimeout.current = null;
+      }
+    };
+  }, []);
 
   const ownedPetTypes = useMemo(() => {
     const types = new Set<PetType>();

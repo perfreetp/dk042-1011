@@ -514,9 +514,10 @@ function ExpeditionProgressPanel() {
 }
 
 function ExpeditionRewardPanel() {
+  const navigate = useNavigate();
   const { expedition, claimExpeditionRewards, discoveries } = useGameStore();
-  const [claimed, setClaimed] = useState(false);
-  const [showRewards, setShowRewards] = useState(false);
+  const [claimedRecordId, setClaimedRecordId] = useState<string | null>(null);
+  const [rewardDetailsVisible, setRewardDetailsVisible] = useState(false);
   const rewardsRef = useRef<ResourceReward[]>([]);
   const discoveriesRef = useRef<string[]>([]);
   const snapshotRef = useRef<{ id: string; name: string; emoji: string; level: number }[]>([]);
@@ -526,33 +527,47 @@ function ExpeditionRewardPanel() {
   const claimTimeRef = useRef(0);
   const expGainedRef = useRef(0);
   const teamPetIdsRef = useRef<string[]>([]);
+  const battleWinsRef = useRef(0);
 
-  if (!expedition || !expedition.rewardsReady) return null;
+  if (!rewardDetailsVisible && (!expedition || !expedition.rewardsReady)) return null;
 
-  const island = getIslandById(expedition.islandId);
-  if (!island) return null;
+  const island = expedition ? getIslandById(expedition.islandId) : null;
 
   const handleClaim = () => {
+    if (!expedition || !island) return;
+
     rewardsRef.current = [...expedition.collected];
     discoveriesRef.current = [...expedition.discoveredItems];
     snapshotRef.current = [...expedition.lockedTeamSnapshots];
     islandRef.current = { emoji: island.emoji, name: island.name };
     usedLuckyCharmRef.current = expedition.usedLuckyCharm;
     encounteredMonstersRef.current = [...expedition.encounteredMonsters].map((mId) => {
-      const tpl = encounteredMonstersRef.current.find((m) => m.templateId === mId);
-      return tpl || { templateId: mId, name: mId, emoji: '👹', defeated: true };
+      const tpl = MONSTER_TEMPLATES.find((m) => m.id === mId);
+      return {
+        templateId: mId,
+        name: tpl?.name || mId,
+        emoji: tpl?.emoji || '👹',
+        defeated: true,
+      };
     });
     claimTimeRef.current = Date.now();
     expGainedRef.current = expedition.collected.find((r) => r.type === 'exp')?.amount || 0;
     teamPetIdsRef.current = [...expedition.lockedTeamPetIds];
-    const success = claimExpeditionRewards();
-    if (success) {
-      setClaimed(true);
-      setTimeout(() => setShowRewards(true), 300);
+    battleWinsRef.current = expedition.battleWins;
+
+    const result = claimExpeditionRewards();
+    if (result.success && result.recordId) {
+      setClaimedRecordId(result.recordId);
+      setRewardDetailsVisible(true);
     }
   };
 
-  if (claimed && showRewards) {
+  const handleClose = () => {
+    setRewardDetailsVisible(false);
+    setClaimedRecordId(null);
+  };
+
+  if (rewardDetailsVisible && claimedRecordId) {
     const discoveryDetails = discoveriesRef.current.map((dId) => {
       const found = discoveries.find((d) => d.id === dId);
       const template = getDiscoveryById(dId);
@@ -564,35 +579,51 @@ function ExpeditionRewardPanel() {
       } : null;
     }).filter(Boolean);
 
-    const monsterDetails = [...expedition.encounteredMonsters].map((mId) => {
-      const tpl = MONSTER_TEMPLATES.find((m) => m.id === mId);
-      return { name: tpl?.name || mId, emoji: tpl?.emoji || '👹', defeated: true };
-    });
+    const monsterDetails = encounteredMonstersRef.current;
 
     const expPerPet = teamPetIdsRef.current.length > 0
       ? Math.floor(expGainedRef.current / teamPetIdsRef.current.length)
       : 0;
 
     return (
-      <div className="rounded-3xl p-6 md:p-8 border backdrop-blur-sm bg-gradient-to-br from-amber-500/20 to-yellow-500/20 border-amber-400/40 relative overflow-hidden">
+      <div className="rounded-3xl p-6 md:p-8 border-2 backdrop-blur-sm bg-gradient-to-br from-emerald-500/20 to-teal-500/20 border-emerald-400/50 relative overflow-hidden">
+        <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-emerald-400 via-teal-400 to-emerald-400" />
         <div className="absolute inset-0 overflow-hidden pointer-events-none">
-          <div className="absolute -top-32 -right-32 w-72 h-72 rounded-full bg-amber-400/20 blur-3xl animate-pulse" />
-          <div className="absolute -bottom-32 -left-32 w-72 h-72 rounded-full bg-yellow-400/20 blur-3xl animate-pulse" />
+          <div className="absolute -top-32 -right-32 w-72 h-72 rounded-full bg-emerald-400/20 blur-3xl animate-pulse" />
+          <div className="absolute -bottom-32 -left-32 w-72 h-72 rounded-full bg-teal-400/20 blur-3xl animate-pulse" />
         </div>
 
         <div className="relative z-10">
-          <div className="text-center mb-6">
-            <div className="text-6xl md:text-7xl mb-4 animate-bounce">🎉</div>
-            <h3 className="font-title text-2xl md:text-3xl text-amber-300 mb-2">🏝️ 远征冒险记录</h3>
-            <p className="text-white/70">恭喜完成本次远征冒险</p>
+          <div className="flex items-center justify-between mb-4">
+            <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-gradient-to-r from-emerald-500/30 to-teal-500/30 border border-emerald-400/50">
+              <Check size={14} className="text-emerald-300" />
+              <span className="text-emerald-200 font-bold text-sm">已领取</span>
+            </div>
+            <button
+              onClick={handleClose}
+              className="text-white/60 hover:text-white transition-colors w-9 h-9 flex items-center justify-center rounded-xl hover:bg-white/10"
+              title="关闭"
+            >
+              ✕
+            </button>
           </div>
 
-          <div className="bg-black/20 rounded-2xl p-5 border border-amber-400/20 space-y-4 mb-6">
+          <div className="text-center mb-6">
+            <div className="text-5xl md:text-6xl mb-3">�</div>
+            <h3 className="font-title text-2xl md:text-3xl text-emerald-300 mb-2">🏝️ 远征冒险记录</h3>
+            <p className="text-white/70">奖励已领取，请核对本次远征详情</p>
+          </div>
+
+          <div className="bg-black/20 rounded-2xl p-5 border border-emerald-400/20 space-y-4 mb-6">
             <div className="flex items-center gap-3 pb-4 border-b border-white/10">
               <span className="text-3xl">{islandRef.current?.emoji}</span>
               <div>
                 <div className="text-white/50 text-xs">出发岛屿</div>
                 <div className="text-white font-bold">{islandRef.current?.name}</div>
+              </div>
+              <div className="ml-auto text-right">
+                <div className="text-white/50 text-xs">战斗胜利</div>
+                <div className="text-emerald-300 font-bold">{battleWinsRef.current} 场</div>
               </div>
             </div>
 
@@ -699,16 +730,30 @@ function ExpeditionRewardPanel() {
             )}
           </div>
 
-          <div className="text-center text-white/50 text-sm">
-            远征队已安全返回码头营地
+          <div className="flex flex-col sm:flex-row gap-3">
+            <button
+              onClick={() => navigate(`/collection?tab=adventures&record=${claimedRecordId}`)}
+              className="flex-1 py-3.5 rounded-xl font-title font-bold text-white bg-gradient-to-r from-indigo-500 to-purple-500 shadow-lg shadow-indigo-500/30 hover:from-indigo-400 hover:to-purple-400 transition-all duration-300 hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-2"
+            >
+              📖 查看完整冒险记录
+            </button>
+            <button
+              onClick={handleClose}
+              className="flex-1 py-3.5 rounded-xl font-title font-bold text-white bg-gradient-to-r from-slate-600 to-slate-700 shadow-lg hover:from-slate-500 hover:to-slate-600 transition-all duration-300 hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-2"
+            >
+              ✅ 关闭
+            </button>
           </div>
         </div>
       </div>
     );
   }
 
+  if (!expedition || !island) return null;
+
   return (
-    <div className="rounded-3xl p-6 md:p-8 border backdrop-blur-sm bg-gradient-to-br from-amber-500/20 to-yellow-500/20 border-amber-400/40 relative overflow-hidden">
+    <div className="rounded-3xl p-6 md:p-8 border-2 backdrop-blur-sm bg-gradient-to-br from-amber-500/20 to-yellow-500/20 border-amber-400/50 relative overflow-hidden">
+      <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-purple-400 via-pink-400 to-purple-400" />
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <div className="absolute -top-32 -right-32 w-72 h-72 rounded-full bg-amber-400/25 blur-3xl animate-pulse" />
         <div className="absolute -bottom-32 -left-32 w-72 h-72 rounded-full bg-yellow-400/25 blur-3xl animate-pulse" />
@@ -719,10 +764,10 @@ function ExpeditionRewardPanel() {
 
       <div className="relative z-10">
         <div className="text-center mb-6">
-          <div className="inline-flex items-center gap-2 px-5 py-2 rounded-full bg-gradient-to-r from-amber-500/30 to-yellow-500/30 border border-amber-400/50 mb-4">
-            <Sparkles size={16} className="text-amber-300 animate-pulse" />
-            <span className="text-amber-200 font-bold text-sm">远征完成</span>
-            <Sparkles size={16} className="text-amber-300 animate-pulse" />
+          <div className="inline-flex items-center gap-2 px-5 py-2 rounded-full bg-gradient-to-r from-purple-500/30 to-pink-500/30 border border-purple-400/50 mb-4">
+            <Sparkles size={16} className="text-purple-300 animate-pulse" />
+            <span className="text-purple-200 font-bold text-sm">待领取</span>
+            <Sparkles size={16} className="text-purple-300 animate-pulse" />
           </div>
           <h3 className="font-title text-3xl md:text-4xl text-transparent bg-clip-text bg-gradient-to-r from-amber-300 via-yellow-300 to-amber-300 drop-shadow-lg mb-2">
             ✨ 奖励已就绪！✨

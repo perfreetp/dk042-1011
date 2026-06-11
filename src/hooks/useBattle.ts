@@ -47,10 +47,11 @@ export const useBattle = (options: UseBattleOptions = {}) => {
     if (success) {
       setUsedLuckyCharmInBattle(true);
       useGameStore.getState().addLog('🍀 战斗前消耗了1个幸运符，发现概率大幅提升！', 'success');
+      gameStore.addLog('战斗中消耗了1个幸运符🍀', 'info', undefined, undefined, undefined);
       return true;
     }
     return false;
-  }, []);
+  }, [gameStore]);
 
   const initBattle = useCallback(
     (
@@ -302,7 +303,7 @@ export const useBattle = (options: UseBattleOptions = {}) => {
 
     const state = battleState;
     let battleRecordId: string | undefined;
-    const itemsGained: string[] = [];
+    const itemsGainedMap: Record<string, number> = {};
 
     if (state.phase === 'playerWin') {
       for (const monster of state.enemyTeam) {
@@ -310,15 +311,16 @@ export const useBattle = (options: UseBattleOptions = {}) => {
           for (const drop of monster.toolDrops) {
             const roll = Math.random();
             if (roll < drop.probability) {
-              itemsGained.push(drop.itemId);
+              itemsGainedMap[drop.itemId] = (itemsGainedMap[drop.itemId] || 0) + 1;
             }
           }
         }
       }
 
+      const itemsGained = Object.entries(itemsGainedMap).map(([itemId, amount]) => ({ itemId, amount }));
       if (itemsGained.length > 0) {
-        for (const itemId of itemsGained) {
-          gameStore.addItem(itemId, 1);
+        for (const { itemId, amount } of itemsGained) {
+          gameStore.addItem(itemId, amount);
         }
       }
 
@@ -333,18 +335,7 @@ export const useBattle = (options: UseBattleOptions = {}) => {
         });
       }
 
-      if (state.rewards.discoveries.length > 0) {
-        state.rewards.discoveries.forEach((discoveryId) => {
-          gameStore.addDiscovery(discoveryId);
-        });
-      }
-
-      state.playerTeam.forEach((pet) => {
-        if (pet.hp > 0 && pet.hp < pet.maxHp * 0.5) {
-          gameStore.addLog(`${pet.emoji}${pet.name} 受了轻伤`, 'warning');
-        }
-      });
-
+      const aggregatedItems = Object.entries(itemsGainedMap).map(([itemId, amount]) => ({ itemId, amount }));
       battleRecordId = gameStore.createBattleRecord({
         difficulty: state.difficulty,
         teamPetIds: state.playerTeam.map((p) => p.id),
@@ -365,11 +356,24 @@ export const useBattle = (options: UseBattleOptions = {}) => {
         resources: state.rewards.resources,
         usedLuckyCharm: usedLuckyCharmInBattle,
         won: true,
+        itemDrops: aggregatedItems,
+      });
+
+      if (state.rewards.discoveries.length > 0) {
+        state.rewards.discoveries.forEach((discoveryId) => {
+          gameStore.addDiscovery(discoveryId, battleRecordId);
+        });
+      }
+
+      state.playerTeam.forEach((pet) => {
+        if (pet.hp > 0 && pet.hp < pet.maxHp * 0.5) {
+          gameStore.addLog(`${pet.emoji}${pet.name} 受了轻伤`, 'warning');
+        }
       });
     } else if (state.phase === 'enemyWin') {
       gameStore.addLog('战斗失败...队伍需要休息', 'danger');
 
-      gameStore.createBattleRecord({
+      battleRecordId = gameStore.createBattleRecord({
         difficulty: state.difficulty,
         teamPetIds: state.playerTeam.map((p) => p.id),
         teamPetSnapshots: state.playerTeam.map((p) => ({
@@ -389,7 +393,14 @@ export const useBattle = (options: UseBattleOptions = {}) => {
         resources: state.rewards.resources,
         usedLuckyCharm: usedLuckyCharmInBattle,
         won: false,
+        itemDrops: [],
       });
+
+      if (state.rewards.discoveries.length > 0) {
+        state.rewards.discoveries.forEach((discoveryId) => {
+          gameStore.addDiscovery(discoveryId, battleRecordId);
+        });
+      }
 
       state.playerTeam.forEach((pet) => {
         if (pet.hp <= 0) {
@@ -414,7 +425,13 @@ export const useBattle = (options: UseBattleOptions = {}) => {
       }),
     }));
 
-    return { phase: state.phase, battleRecordId, itemsGained };
+    const itemsGained = Object.entries(itemsGainedMap).map(([itemId, amount]) => ({ itemId, amount }));
+    return {
+      phase: state.phase,
+      battleRecordId,
+      itemsGained,
+      usedLuckyCharm: usedLuckyCharmInBattle,
+    };
   }, [battleState, gameStore, usedLuckyCharmInBattle]);
 
   const resetBattle = useCallback(() => {
