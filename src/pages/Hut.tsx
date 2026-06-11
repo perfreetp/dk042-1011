@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useGameStore } from '../store/useGameStore';
-import type { Pet, Egg, PetType, Rarity } from '../types';
+import { ITEMS, getItemById } from '../data/items';
+import type { Pet, Egg, PetType, Rarity, Item } from '../types';
 
 const TYPE_EMOJI: Record<PetType, string> = {
   fire: '🔥',
@@ -44,23 +45,110 @@ const progressBarColor = (value: number, max: number) => {
   return 'bg-red-500';
 };
 
+interface ItemSelectModalProps {
+  items: Item[];
+  inventory: Record<string, number>;
+  onSelect: (itemId: string) => void;
+  onClose: () => void;
+  title: string;
+}
+
+function ItemSelectModal({ items, inventory, onSelect, onClose, title }: ItemSelectModalProps) {
+  const availableItems = items.filter((item) => (inventory[item.id] || 0) > 0);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="glass-card rounded-2xl p-5 card-shadow w-full max-w-md mx-4 bounce-in"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-title text-2xl text-white">{title}</h3>
+          <button
+            onClick={onClose}
+            className="w-8 h-8 rounded-full bg-white/10 text-white/80 hover:bg-white/20 flex items-center justify-center transition-colors"
+          >
+            ✕
+          </button>
+        </div>
+
+        {availableItems.length > 0 ? (
+          <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
+            {availableItems.map((item) => (
+              <button
+                key={item.id}
+                onClick={() => {
+                  onSelect(item.id);
+                  onClose();
+                }}
+                className={`w-full ${rarityClass(item.rarity)} rounded-xl p-3 text-left card-shadow hover:scale-[1.02] active:scale-[0.98] transition-all duration-200`}
+              >
+                <div className="flex items-center gap-3">
+                  <span className="text-3xl">{item.emoji}</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="font-game text-white font-bold">{item.name}</span>
+                      <span className="text-xs font-game text-white/80 bg-black/30 px-2 py-0.5 rounded-full">
+                        ×{inventory[item.id]}
+                      </span>
+                    </div>
+                    <p className="text-xs text-white/70 mt-0.5">{item.description}</p>
+                  </div>
+                  <span className="text-white/60 text-lg">→</span>
+                </div>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="text-center py-8">
+            <div className="text-5xl mb-3 opacity-50">📦</div>
+            <p className="text-white/60 font-game">背包里没有可用的道具</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function EggCard({ egg }: { egg: Egg }) {
   const accelerateHatch = useGameStore((s) => s.accelerateHatch);
   const hatchEgg = useGameStore((s) => s.hatchEgg);
   const spendResource = useGameStore((s) => s.spendResource);
   const addLog = useGameStore((s) => s.addLog);
   const resources = useGameStore((s) => s.resources);
+  const inventory = useGameStore((s) => s.inventory);
+  const useItem = useGameStore((s) => s.useItem);
 
   const isReady = egg.progress >= 100;
   const herbCost = 3;
+  const acceleratorCount = inventory['hatch-accelerator'] || 0;
 
-  const handleAccelerate = () => {
+  const handleHerbAccelerate = () => {
     if (resources.herb < herbCost) {
       addLog('草药不足！需要 3 草药加速孵化', 'warning');
       return;
     }
+    if (isReady) {
+      addLog('这颗蛋已经可以孵化了！', 'info');
+      return;
+    }
     spendResource('herb', herbCost);
     accelerateHatch(egg.id, 10);
+  };
+
+  const handleAccelerator = () => {
+    if (acceleratorCount <= 0) {
+      addLog('孵化加速器不足！', 'warning');
+      return;
+    }
+    if (isReady) {
+      addLog('这颗蛋已经可以孵化了！', 'info');
+      return;
+    }
+    useItem('hatch-accelerator', egg.id);
   };
 
   const handleHatch = () => {
@@ -102,13 +190,22 @@ function EggCard({ egg }: { egg: Egg }) {
           🐣 孵化！
         </button>
       ) : (
-        <button
-          onClick={handleAccelerate}
-          disabled={resources.herb < herbCost}
-          className="w-full py-2 rounded-lg bg-white/20 text-white font-game text-sm hover:bg-white/30 disabled:opacity-50 disabled:cursor-not-allowed hover:scale-102 active:scale-98 transition-all duration-200"
-        >
-          🌿 ×{herbCost} 加速 +10%
-        </button>
+        <div className="space-y-2">
+          <button
+            onClick={handleHerbAccelerate}
+            disabled={resources.herb < herbCost}
+            className="w-full py-2 rounded-lg bg-white/20 text-white font-game text-sm hover:bg-white/30 disabled:opacity-50 disabled:cursor-not-allowed hover:scale-102 active:scale-98 transition-all duration-200"
+          >
+            🌿 ×{herbCost} 草药加速 +10%
+          </button>
+          <button
+            onClick={handleAccelerator}
+            disabled={acceleratorCount <= 0}
+            className="w-full py-2 rounded-lg bg-gradient-to-r from-violet-500/80 to-purple-500/80 text-white font-game text-sm hover:from-violet-500 hover:to-purple-500 disabled:opacity-50 disabled:cursor-not-allowed hover:scale-102 active:scale-98 transition-all duration-200"
+          >
+            ⚡ 孵化器 ×{acceleratorCount} +30%
+          </button>
+        </div>
       )}
     </div>
   );
@@ -160,14 +257,40 @@ function PetCard({ pet, isSelected, inTeam, onClick }: {
         <span className="font-game">{TYPE_EMOJI[pet.type]} {TYPE_NAMES[pet.type]}</span>
         <span className="text-lg" title={`心情 ${pet.mood}`}>{moodEmoji(pet.mood)}</span>
       </div>
+
+      <div className="text-[10px] font-game text-white/70 mt-1 text-right">
+        {RARITY_NAMES[pet.rarity]}
+      </div>
     </div>
   );
 }
 
-function PetDetail({ pet }: { pet: Pet }) {
+interface PetDetailProps {
+  pet: Pet;
+  onOpenPotionModal: () => void;
+  onOpenSnackModal: () => void;
+}
+
+function PetDetail({ pet, onOpenPotionModal, onOpenSnackModal }: PetDetailProps) {
   const feedPet = useGameStore((s) => s.feedPet);
   const restPet = useGameStore((s) => s.restPet);
   const resources = useGameStore((s) => s.resources);
+  const team = useGameStore((s) => s.team);
+  const addPetToTeam = useGameStore((s) => s.addPetToTeam);
+  const removePetFromTeam = useGameStore((s) => s.removePetFromTeam);
+  const inventory = useGameStore((s) => s.inventory);
+
+  const inTeam = team.includes(pet.id);
+
+  const healItemsCount = useMemo(() => {
+    return ITEMS.filter((item) => item.effect?.type === 'heal')
+      .reduce((sum, item) => sum + (inventory[item.id] || 0), 0);
+  }, [inventory]);
+
+  const moodStaminaItemsCount = useMemo(() => {
+    return ITEMS.filter((item) => item.effect?.type === 'moodBoost' || item.effect?.type === 'staminaBoost')
+      .reduce((sum, item) => sum + (inventory[item.id] || 0), 0);
+  }, [inventory]);
 
   return (
     <div className="glass-card rounded-2xl p-5 card-shadow">
@@ -280,23 +403,59 @@ function PetDetail({ pet }: { pet: Pet }) {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-2 gap-2 mb-3">
         <button
           onClick={() => feedPet(pet.id)}
           disabled={resources.herb < 5}
-          className="py-3 rounded-xl bg-gradient-to-r from-rose-500 to-pink-500 text-white font-game shadow-lg shadow-rose-500/30 hover:shadow-rose-500/50 hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 transition-all duration-200"
+          className="py-2.5 rounded-xl bg-gradient-to-r from-rose-500 to-pink-500 text-white font-game shadow-lg shadow-rose-500/30 hover:shadow-rose-500/50 hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 transition-all duration-200"
         >
-          <div className="text-lg mb-0.5">🍖 喂食</div>
+          <div className="text-base mb-0.5">🍖 喂食</div>
           <div className="text-[10px] text-white/80">🌿-5 / 心情+25 体力+15</div>
         </button>
         <button
           onClick={() => restPet(pet.id)}
-          className="py-3 rounded-xl bg-gradient-to-r from-indigo-500 to-violet-500 text-white font-game shadow-lg shadow-indigo-500/30 hover:shadow-indigo-500/50 hover:scale-105 active:scale-95 transition-all duration-200"
+          className="py-2.5 rounded-xl bg-gradient-to-r from-indigo-500 to-violet-500 text-white font-game shadow-lg shadow-indigo-500/30 hover:shadow-indigo-500/50 hover:scale-105 active:scale-95 transition-all duration-200"
         >
-          <div className="text-lg mb-0.5">💤 休息</div>
+          <div className="text-base mb-0.5">💤 休息</div>
           <div className="text-[10px] text-white/80">恢复HP+30% 体力+40</div>
         </button>
       </div>
+
+      <div className="grid grid-cols-2 gap-2 mb-3">
+        <button
+          onClick={onOpenPotionModal}
+          disabled={healItemsCount <= 0}
+          className="py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-game shadow-lg shadow-emerald-500/30 hover:shadow-emerald-500/50 hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 transition-all duration-200"
+        >
+          <div className="text-base mb-0.5">🧪 药水</div>
+          <div className="text-[10px] text-white/80">治疗类 ×{healItemsCount}</div>
+        </button>
+        <button
+          onClick={onOpenSnackModal}
+          disabled={moodStaminaItemsCount <= 0}
+          className="py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-white font-game shadow-lg shadow-amber-500/30 hover:shadow-amber-500/50 hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 transition-all duration-200"
+        >
+          <div className="text-base mb-0.5">🍰 零食</div>
+          <div className="text-[10px] text-white/80">心情体力类 ×{moodStaminaItemsCount}</div>
+        </button>
+      </div>
+
+      {inTeam ? (
+        <button
+          onClick={() => removePetFromTeam(pet.id)}
+          className="w-full py-2.5 rounded-xl bg-gradient-to-r from-red-500 to-rose-500 text-white font-game shadow-lg hover:scale-102 active:scale-98 transition-all duration-200"
+        >
+          🚫 移出队伍
+        </button>
+      ) : (
+        <button
+          onClick={() => addPetToTeam(pet.id)}
+          disabled={team.length >= 3}
+          className="w-full py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-game shadow-lg hover:scale-102 active:scale-98 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 transition-all duration-200"
+        >
+          {team.length >= 3 ? '⚠️ 队伍已满（最多3只）' : '✅ 加入队伍'}
+        </button>
+      )}
     </div>
   );
 }
@@ -376,13 +535,111 @@ function TeamBuilder({ selectedPetId }: { selectedPetId: string | null }) {
   );
 }
 
+interface QuickItemBarProps {
+  onUseItem: (itemId: string) => void;
+  disabled: boolean;
+}
+
+function QuickItemBar({ onUseItem, disabled }: QuickItemBarProps) {
+  const inventory = useGameStore((s) => s.inventory);
+
+  const quickItems = [
+    { id: 'heal-potion', emoji: '🧪', name: '治疗药水', color: 'from-emerald-500 to-teal-500' },
+    { id: 'mood-snack', emoji: '🍰', name: '美味零食', color: 'from-pink-500 to-rose-500' },
+    { id: 'energy-drink', emoji: '🥤', name: '能量饮料', color: 'from-amber-500 to-orange-500' },
+  ];
+
+  return (
+    <div className="glass-card rounded-2xl p-4 card-shadow">
+      <h3 className="font-title text-lg text-white mb-3 flex items-center gap-2">
+        <span>🎒</span> 道具快捷栏
+      </h3>
+      <div className="grid grid-cols-3 gap-2">
+        {quickItems.map((item) => {
+          const count = inventory[item.id] || 0;
+          const itemData = getItemById(item.id);
+          return (
+            <button
+              key={item.id}
+              onClick={() => onUseItem(item.id)}
+              disabled={disabled || count <= 0}
+              className={`py-3 rounded-xl bg-gradient-to-b ${item.color} text-white font-game shadow-lg hover:scale-105 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100 transition-all duration-200 flex flex-col items-center`}
+              title={itemData?.description || ''}
+            >
+              <span className="text-2xl mb-1">{item.emoji}</span>
+              <span className="text-[10px]">×{count}</span>
+            </button>
+          );
+        })}
+      </div>
+      {disabled && (
+        <p className="text-[11px] text-white/50 text-center mt-2 font-game">请先选择一只宠物</p>
+      )}
+    </div>
+  );
+}
+
 export default function Hut() {
   const eggs = useGameStore((s) => s.eggs);
   const pets = useGameStore((s) => s.pets);
+  const inventory = useGameStore((s) => s.inventory);
+  const useItem = useGameStore((s) => s.useItem);
+  const addLog = useGameStore((s) => s.addLog);
   const [selectedPetId, setSelectedPetId] = useState<string | null>(pets[0]?.id ?? null);
   const team = useGameStore((s) => s.team);
 
+  const [showPotionModal, setShowPotionModal] = useState(false);
+  const [showSnackModal, setShowSnackModal] = useState(false);
+  const [showQuickItemModal, setShowQuickItemModal] = useState(false);
+  const [quickItemId, setQuickItemId] = useState<string | null>(null);
+
   const selectedPet = pets.find((p) => p.id === selectedPetId) ?? null;
+
+  const healItems = useMemo(
+    () => ITEMS.filter((item) => item.effect?.type === 'heal'),
+    []
+  );
+
+  const snackItems = useMemo(
+    () => ITEMS.filter((item) => item.effect?.type === 'moodBoost' || item.effect?.type === 'staminaBoost'),
+    []
+  );
+
+  const handleUsePotion = (itemId: string) => {
+    if (selectedPetId) {
+      useItem(itemId, selectedPetId);
+    }
+  };
+
+  const handleUseSnack = (itemId: string) => {
+    if (selectedPetId) {
+      useItem(itemId, selectedPetId);
+    }
+  };
+
+  const handleQuickItem = (itemId: string) => {
+    if (!selectedPetId) {
+      addLog('请先选择一只宠物！', 'warning');
+      return;
+    }
+    const count = inventory[itemId] || 0;
+    if (count <= 0) {
+      addLog('道具数量不足！', 'warning');
+      return;
+    }
+    setQuickItemId(itemId);
+    setShowQuickItemModal(true);
+  };
+
+  const confirmQuickItem = () => {
+    if (quickItemId && selectedPetId) {
+      useItem(quickItemId, selectedPetId);
+    }
+    setShowQuickItemModal(false);
+    setQuickItemId(null);
+  };
+
+  const quickItemData = quickItemId ? getItemById(quickItemId) : null;
 
   return (
     <div className="page-enter container mx-auto px-4 py-6 space-y-6">
@@ -448,9 +705,77 @@ export default function Hut() {
 
         <div className="space-y-6">
           <TeamBuilder selectedPetId={selectedPetId} />
-          {selectedPet && <PetDetail pet={selectedPet} />}
+          <QuickItemBar
+            onUseItem={handleQuickItem}
+            disabled={!selectedPetId}
+          />
+          {selectedPet && (
+            <PetDetail
+              pet={selectedPet}
+              onOpenPotionModal={() => setShowPotionModal(true)}
+              onOpenSnackModal={() => setShowSnackModal(true)}
+            />
+          )}
         </div>
       </div>
+
+      {showPotionModal && selectedPetId && (
+        <ItemSelectModal
+          items={healItems}
+          inventory={inventory}
+          title="🧪 选择治疗药水"
+          onSelect={handleUsePotion}
+          onClose={() => setShowPotionModal(false)}
+        />
+      )}
+
+      {showSnackModal && selectedPetId && (
+        <ItemSelectModal
+          items={snackItems}
+          inventory={inventory}
+          title="🍰 选择零食"
+          onSelect={handleUseSnack}
+          onClose={() => setShowSnackModal(false)}
+        />
+      )}
+
+      {showQuickItemModal && quickItemData && selectedPet && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+          onClick={() => setShowQuickItemModal(false)}
+        >
+          <div
+            className="glass-card rounded-2xl p-5 card-shadow w-full max-w-sm mx-4 bounce-in"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="font-title text-2xl text-white text-center mb-4">确认使用</h3>
+            <div className="text-center mb-4">
+              <div className="text-6xl mb-2">{quickItemData.emoji}</div>
+              <div className="font-game text-white text-lg font-bold">{quickItemData.name}</div>
+              <div className="text-sm text-white/70 mt-1">{quickItemData.description}</div>
+            </div>
+            <div className="bg-white/10 rounded-xl p-3 mb-4">
+              <div className="text-center text-white/80 text-sm font-game">
+                对 <span className="text-white font-bold">{selectedPet.emoji} {selectedPet.name}</span> 使用？
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                onClick={() => setShowQuickItemModal(false)}
+                className="py-2.5 rounded-xl bg-white/10 text-white font-game hover:bg-white/20 transition-colors"
+              >
+                取消
+              </button>
+              <button
+                onClick={confirmQuickItem}
+                className={`py-2.5 rounded-xl ${rarityClass(quickItemData.rarity)} text-white font-game hover:scale-105 active:scale-95 transition-all duration-200`}
+              >
+                确认使用
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

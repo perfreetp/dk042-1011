@@ -15,12 +15,13 @@ import type {
   Equipment,
 } from '../types';
 import { STARTER_PETS, PET_TEMPLATES, SKILL_POOL, RARITY_MULTIPLIER } from '../data/pets';
-import { getInitialIslandProgress, ISLANDS } from '../data/islands';
+import { getInitialIslandProgress, ISLANDS, getIslandById } from '../data/islands';
 import { generateInitialOrders, refreshOrders } from '../data/orders';
 import { getUpgradeCost, getFacilityBonus, getMaxFacilityLevel } from '../data/facilities';
 import { getRecipeById } from '../data/recipes';
-import { createDiscovery, DISCOVERY_TEMPLATES } from '../data/discoveries';
-import { randomInt, randomChoice, randomPetName, randomId, weightedRandomChoice, clamp } from '../utils/random';
+import { createDiscovery, DISCOVERY_TEMPLATES, getDiscoveryById } from '../data/discoveries';
+import { getItemById, ITEMS } from '../data/items';
+import { randomInt, randomChoice, randomPetName, randomId, weightedRandomChoice, clamp, randomBool } from '../utils/random';
 
 const STORAGE_KEY = 'maple-pet-expedition-save-v1';
 
@@ -102,6 +103,11 @@ const getInitialState = (): GameState => ({
     },
   ],
   equipment: createInitialEquipment(),
+  inventory: {
+    'heal-potion': 3,
+    'mood-snack': 2,
+    'energy-drink': 2,
+  },
   lastOrderRefresh: Date.now(),
 });
 
@@ -110,6 +116,13 @@ const loadFromStorage = (): GameState | null => {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) {
       const parsed = JSON.parse(saved);
+      if (!parsed.inventory) {
+        parsed.inventory = {
+          'heal-potion': 3,
+          'mood-snack': 2,
+          'energy-drink': 2,
+        };
+      }
       return parsed as GameState;
     }
   } catch (e) {
@@ -143,7 +156,9 @@ interface GameActions {
 
   startExpedition: (islandId: string) => boolean;
   updateExpeditionStatus: (status: Expedition['status']) => void;
+  updateExpeditionProgress: () => void;
   completeExpedition: (rewards: ResourceReward[], battleWins: number, discoveries: string[]) => void;
+  claimExpeditionRewards: () => boolean;
   cancelExpedition: () => void;
 
   collectResource: (type: 'ore' | 'herb' | 'shell') => number;
@@ -154,8 +169,14 @@ interface GameActions {
   submitOrder: (orderId: string) => boolean;
   refreshOrderList: () => void;
 
-  addLog: (message: string, type?: LogEntry['type']) => void;
+  addLog: (message: string, type?: LogEntry['type'], relatedDiscoveryId?: string, relatedIslandId?: string) => void;
   addDiscovery: (discoveryId: string) => boolean;
+  rollDiscoveryForIsland: (islandId: string) => string | null;
+  getDiscoverySource: (discoveryId: string) => string;
+
+  useItem: (itemId: string, targetPetId?: string) => boolean;
+  addItem: (itemId: string, amount: number) => void;
+  removeItem: (itemId: string, amount: number) => boolean;
 
   checkAndUnlockIslands: () => string[];
   resetGame: () => void;
@@ -511,18 +532,24 @@ export const useGameStore = create<GameStore>((set, get) => ({
       return false;
     }
 
+    const durationSeconds = 30 + island.level * 15;
+
     const expedition: Expedition = {
       islandId,
       startTime: Date.now(),
+      durationSeconds,
       status: 'traveling',
+      rewardsReady: false,
       battleWins: 0,
       collected: [],
       logs: [`远征队出发前往 ${island.emoji}${island.name}`],
       discoveredItems: [],
+      encounteredMonsters: [],
+      battleLog: [],
     };
 
     set({ expedition });
-    get().addLog(`🚢 远征队出发前往 ${island.emoji}${island.name}！消耗 ${travelCost} 金币`, 'info');
+    get().addLog(`🚢 远征队出发前往 ${island.emoji}${island.name}！消耗 ${travelCost} 金币`, 'info', undefined, islandId);
     return true;
   },
 
@@ -538,12 +565,80 @@ export const useGameStore = create<GameStore>((set, get) => ({
     });
   },
 
+  updateExpeditionProgress: () => {
+    const state = get();
+    if (!state.expedition || state.expedition.rewardsReady) return;
+
+    const now = Date.now();
+    const elapsed = (now - state.expedition.startTime) / 1000;
+
+    if (elapsed >= state.expedition.durationSeconds) {
+      const island = getIslandById(state.expedition.islandId);
+      if (!island) return;
+
+      const collected: ResourceReward[] = [];
+      for (const specialty of island.specialties) {
+        const amount = randomInt(5, 15) + island.level * 3;
+        collected.push({ type: specialty, amount });
+      }
+      const goldAmount = randomInt(10, 30) + island.level * 5;
+      collected.push({ type: 'gold', amount: goldAmount });
+      const expAmount = randomInt(20, 50) + island.level * 10;
+      collected.push({ type: 'exp', amount: expAmount });
+
+      const encounteredMonsters: string[] = [];
+      let battleWins = 0;
+      const battleLog: string[] = [];
+      if (island.monsters.length > 0) {
+        const numBattles = randomInt(1, 3);
+        for (let i = 0; i < numBattles; i++) {
+          const monsterId = randomChoice(island.monsters);
+          encounteredMonsters.push(monsterId);
+          battleWins++;
+          battleLog.push(`击败了 ${monsterId}`);
+        }
+      }
+
+      const discoveredItems: string[] = [];
+      const discoveryId = get().rollDiscoveryForIsland(island.id);
+      if (discoveryId) {
+        discoveredItems.push(discoveryId);
+      }
+
+      const logs = [...state.expedition.logs];
+      logs.push(`到达 ${island.emoji}${island.name}`);
+      if (collected.length > 0) {
+        logs.push(`采集了 ${collected.map(r => `${r.amount}${r.type}`).join('、')}`);
+      }
+      if (encounteredMonsters.length > 0) {
+        logs.push(`遭遇了 ${encounteredMonsters.length} 只怪物`);
+      }
+      if (discoveredItems.length > 0) {
+        logs.push('有了新的发现！');
+      }
+      logs.push('远征完成，等待领取奖励');
+
+      set((s) => ({
+        expedition: {
+          ...s.expedition!,
+          status: 'completed',
+          rewardsReady: true,
+          battleWins,
+          collected,
+          discoveredItems,
+          encounteredMonsters,
+          battleLog,
+          logs,
+        },
+      }));
+    }
+  },
+
   completeExpedition: (rewards, battleWins, discoveries) => {
     const state = get();
     if (!state.expedition) return;
 
     const islandId = state.expedition.islandId;
-    const island = ISLANDS.find((i) => i.id === islandId);
 
     get().addResources(rewards);
 
@@ -584,6 +679,103 @@ export const useGameStore = create<GameStore>((set, get) => ({
       `🏆 远征完成！获得奖励，探索度 +${progressGain}%`,
       'success'
     );
+  },
+
+  claimExpeditionRewards: () => {
+    const state = get();
+    if (!state.expedition || !state.expedition.rewardsReady) {
+      get().addLog('远征奖励尚未准备好！', 'warning');
+      return false;
+    }
+
+    const islandId = state.expedition.islandId;
+    const island = getIslandById(islandId);
+    if (!island) return false;
+
+    const { collected, battleWins, discoveredItems, encounteredMonsters } = state.expedition;
+
+    get().addResources(collected);
+
+    const totalExp = collected.find((r) => r.type === 'exp')?.amount || 0;
+    if (totalExp > 0 && state.team.length > 0) {
+      const expPerPet = Math.floor(totalExp / state.team.length);
+      for (const petId of state.team) {
+        get().addPetExp(petId, expPerPet);
+      }
+    }
+
+    for (const discoveryId of discoveredItems) {
+      get().addDiscovery(discoveryId);
+    }
+
+    const currentProgress = state.islandProgress[islandId] || 0;
+    const progressGain = Math.min(100 - currentProgress, 15 + battleWins * 5);
+
+    for (const petId of state.team) {
+      set((s) => ({
+        pets: s.pets.map((p) =>
+          p.id === petId
+            ? {
+                ...p,
+                stamina: Math.max(0, p.stamina - 20 - island.level * 2),
+                mood: Math.max(0, p.mood - 10 - island.level),
+              }
+            : p
+        ),
+      }));
+    }
+
+    set((s) => ({
+      expedition: null,
+      islandProgress: {
+        ...s.islandProgress,
+        [islandId]: currentProgress + progressGain,
+      },
+    }));
+
+    const unlocked = get().checkAndUnlockIslands();
+    if (unlocked.length > 0) {
+      unlocked.forEach((id) => {
+        const isl = ISLANDS.find((i) => i.id === id);
+        if (isl) {
+          get().addLog(`🗺️ 新岛屿解锁：${isl.emoji}${isl.name}！`, 'success');
+        }
+      });
+    }
+
+    const collectedSummary = collected
+      .filter((r) => r.type !== 'exp')
+      .map((r) => `${r.amount}${r.type === 'gold' ? '金币' : r.type === 'ore' ? '矿石' : r.type === 'herb' ? '草药' : '贝壳'}`)
+      .join('、');
+
+    get().addLog(
+      `🏆 远征奖励已领取！${collectedSummary}，探索度 +${progressGain}%`,
+      'success',
+      discoveredItems[0],
+      islandId
+    );
+
+    if (encounteredMonsters.length > 0) {
+      get().addLog(
+        `⚔️ 本次远征共击败 ${battleWins} 只怪物`,
+        'info',
+        undefined,
+        islandId
+      );
+    }
+
+    if (discoveredItems.length > 0) {
+      for (const dId of discoveredItems) {
+        get().addLog(
+          `✨ 发现了稀有物品！`,
+          'success',
+          dId,
+          islandId
+        );
+      }
+    }
+
+    return true;
   },
 
   cancelExpedition: () => {
@@ -631,8 +823,12 @@ export const useGameStore = create<GameStore>((set, get) => ({
         `制作了 ${recipe.emoji}${recipe.name}！获得 ${recipe.output.amount} ${recipe.output.type}`,
         'success'
       );
-    } else {
-      get().addLog(`制作了 ${recipe.emoji}${recipe.name}！`, 'success');
+    } else if ('itemId' in recipe.output && recipe.output.itemId) {
+      get().addItem(recipe.output.itemId, recipe.output.amount);
+      get().addLog(
+        `制作了 ${recipe.emoji}${recipe.name}！获得 ${recipe.output.amount} 个`,
+        'success'
+      );
     }
 
     return true;
@@ -725,12 +921,14 @@ export const useGameStore = create<GameStore>((set, get) => ({
     get().addLog('📋 订单列表已刷新！', 'info');
   },
 
-  addLog: (message, type = 'info') => {
+  addLog: (message, type = 'info', relatedDiscoveryId, relatedIslandId) => {
     const entry: LogEntry = {
       id: randomId('log'),
       timestamp: Date.now(),
       message,
       type,
+      relatedDiscoveryId,
+      relatedIslandId,
     };
     set((state) => ({
       logs: [entry, ...state.logs].slice(0, 100),
@@ -752,8 +950,237 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
     get().addLog(
       `📖 新发现！${discovery.emoji}${discovery.name} [${discovery.rarity}]`,
-      'success'
+      'success',
+      discoveryId
     );
+    return true;
+  },
+
+  rollDiscoveryForIsland: (islandId) => {
+    const island = getIslandById(islandId);
+    if (!island) return null;
+
+    const roll = Math.random() * 100;
+    let rarity: Rarity | null = null;
+
+    if (roll < 1) {
+      rarity = 'legendary';
+    } else if (roll < 6) {
+      rarity = 'epic';
+    } else if (roll < 21) {
+      rarity = 'rare';
+    } else if (roll < 51) {
+      rarity = 'common';
+    }
+
+    if (!rarity) return null;
+
+    const relatedDiscoveries = DISCOVERY_TEMPLATES.filter((d) => {
+      if (d.rarity !== rarity) return false;
+      if (island.rareDrops.includes(d.id)) return true;
+      if (d.referenceId === island.id) return true;
+      if (d.category === 'lore') return true;
+      return false;
+    });
+
+    if (relatedDiscoveries.length === 0) {
+      const fallbackDiscoveries = DISCOVERY_TEMPLATES.filter((d) => d.rarity === rarity);
+      if (fallbackDiscoveries.length === 0) return null;
+      return randomChoice(fallbackDiscoveries).id;
+    }
+
+    return randomChoice(relatedDiscoveries).id;
+  },
+
+  getDiscoverySource: (discoveryId) => {
+    const discovery = getDiscoveryById(discoveryId);
+    if (!discovery) return '未知来源';
+
+    if (discovery.referenceId) {
+      const island = getIslandById(discovery.referenceId);
+      if (island) {
+        return `${island.emoji}${island.name} 特产`;
+      }
+    }
+
+    switch (discovery.category) {
+      case 'pet':
+        return '🐾 宠物探索';
+      case 'monster':
+        return '⚔️ 战斗掉落';
+      case 'treasure':
+        return '💎 宝藏探索';
+      case 'lore':
+        return '📚 传说故事';
+      case 'island':
+        return '🏝️ 岛屿探索';
+      default:
+        return '❓ 未知来源';
+    }
+  },
+
+  useItem: (itemId, targetPetId) => {
+    const state = get();
+    const item = getItemById(itemId);
+
+    if (!item) {
+      get().addLog('道具不存在！', 'warning');
+      return false;
+    }
+
+    if (!item.effect) {
+      get().addLog(item.emoji + item.name + ' 无法使用！', 'warning');
+      return false;
+    }
+
+    const currentAmount = state.inventory[itemId] || 0;
+    if (currentAmount <= 0) {
+      get().addLog(item.emoji + item.name + ' 数量不足！', 'warning');
+      return false;
+    }
+
+    const effectType = item.effect.type;
+    const effectValue = item.effect.value;
+
+    switch (effectType) {
+      case 'heal': {
+        if (!targetPetId) {
+          get().addLog('请选择要使用道具的宠物！', 'warning');
+          return false;
+        }
+        const pet = state.pets.find((p) => p.id === targetPetId);
+        if (!pet) {
+          get().addLog('宠物不存在！', 'warning');
+          return false;
+        }
+        if (pet.hp >= pet.maxHp) {
+          get().addLog(pet.emoji + pet.name + ' 生命值已满！', 'info');
+          return false;
+        }
+        const healAmount = effectValue >= 999 ? pet.maxHp : effectValue;
+        get().healPet(targetPetId, healAmount);
+        const healMsg = effectValue >= 999
+          ? item.emoji + ' 对 ' + pet.emoji + pet.name + ' 使用了 ' + item.name + '，生命值完全恢复！'
+          : item.emoji + ' 对 ' + pet.emoji + pet.name + ' 使用了 ' + item.name + '，恢复了 ' + effectValue + ' 点生命！';
+        get().addLog(healMsg, 'success');
+        break;
+      }
+      case 'hatchBoost': {
+        if (!targetPetId) {
+          get().addLog('请选择要加速的蛋！', 'warning');
+          return false;
+        }
+        const egg = state.eggs.find((e) => e.id === targetPetId);
+        if (!egg) {
+          get().addLog('蛋不存在！', 'warning');
+          return false;
+        }
+        if (egg.progress >= 100) {
+          get().addLog('这颗蛋已经孵化完成了！', 'info');
+          return false;
+        }
+        get().accelerateHatch(targetPetId, effectValue);
+        get().addLog(
+          item.emoji + ' 使用了 ' + item.name + '，孵化进度 +' + effectValue + '%！',
+          'success'
+        );
+        break;
+      }
+      case 'moodBoost': {
+        if (!targetPetId) {
+          get().addLog('请选择要使用道具的宠物！', 'warning');
+          return false;
+        }
+        const pet = state.pets.find((p) => p.id === targetPetId);
+        if (!pet) {
+          get().addLog('宠物不存在！', 'warning');
+          return false;
+        }
+        if (pet.mood >= 100) {
+          get().addLog(pet.emoji + pet.name + ' 心情值已满！', 'info');
+          return false;
+        }
+        const boostAmount = effectValue >= 999 ? 100 : effectValue;
+        set((s) => ({
+          pets: s.pets.map((p) =>
+            p.id === targetPetId
+              ? { ...p, mood: Math.min(100, p.mood + boostAmount) }
+              : p
+          ),
+        }));
+        get().addLog(
+          item.emoji + ' ' + pet.emoji + pet.name + ' 吃了 ' + item.name + '，心情变好了！',
+          'success'
+        );
+        break;
+      }
+      case 'staminaBoost': {
+        if (!targetPetId) {
+          get().addLog('请选择要使用道具的宠物！', 'warning');
+          return false;
+        }
+        const pet = state.pets.find((p) => p.id === targetPetId);
+        if (!pet) {
+          get().addLog('宠物不存在！', 'warning');
+          return false;
+        }
+        if (pet.stamina >= 100) {
+          get().addLog(pet.emoji + pet.name + ' 体力值已满！', 'info');
+          return false;
+        }
+        const boostAmount = effectValue >= 999 ? 100 : effectValue;
+        set((s) => ({
+          pets: s.pets.map((p) =>
+            p.id === targetPetId
+              ? { ...p, stamina: Math.min(100, p.stamina + boostAmount) }
+              : p
+          ),
+        }));
+        get().addLog(
+          item.emoji + ' ' + pet.emoji + pet.name + ' 喝了 ' + item.name + '，体力恢复了！',
+          'success'
+        );
+        break;
+      }
+      default:
+        get().addLog('未知的道具类型！', 'warning');
+        return false;
+    }
+
+    get().removeItem(itemId, 1);
+    return true;
+  },
+
+  addItem: (itemId, amount) => {
+    if (amount <= 0) return;
+    const item = getItemById(itemId);
+    if (!item) return;
+
+    set((state) => ({
+      inventory: {
+        ...state.inventory,
+        [itemId]: (state.inventory[itemId] || 0) + amount,
+      },
+    }));
+
+    get().addLog('获得了 ' + item.emoji + item.name + ' x' + amount, 'success');
+  },
+
+  removeItem: (itemId, amount) => {
+    const state = get();
+    const current = state.inventory[itemId] || 0;
+
+    if (current < amount) {
+      return false;
+    }
+
+    set((s) => ({
+      inventory: {
+        ...s.inventory,
+        [itemId]: current - amount,
+      },
+    }));
+
     return true;
   },
 
@@ -795,6 +1222,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
         islandProgress,
         logs,
         equipment,
+        inventory,
         lastOrderRefresh,
       } = state;
       const saveData = {
@@ -809,6 +1237,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
         islandProgress,
         logs,
         equipment,
+        inventory,
         lastOrderRefresh,
       };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(saveData));

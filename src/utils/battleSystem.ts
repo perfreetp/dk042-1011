@@ -1,6 +1,7 @@
-import type { Pet, Monster, PetType, BattleState, BattleAction, Skill, SynergySkill } from '../types';
+import type { Pet, Monster, PetType, BattleState, BattleAction, Skill, SynergySkill, Rarity, ResourceReward } from '../types';
 import { SYNERGY_SKILLS } from '../data/pets';
-import { randomFloat, randomInt, randomChoice, clamp } from './random';
+import { DISCOVERY_TEMPLATES } from '../data/discoveries';
+import { randomFloat, randomInt, randomChoice, clamp, weightedRandomChoice } from './random';
 
 const TYPE_CHART: Record<PetType, Record<PetType, number>> = {
   fire: { fire: 1, water: 0.5, earth: 1, wind: 2, light: 1, dark: 1 },
@@ -354,12 +355,92 @@ export const executeSynergySkill = (
   };
 };
 
+const getMonsterRarity = (monster: Monster): Rarity => {
+  const exp = monster.expReward;
+  if (exp >= 400) return 'legendary';
+  if (exp >= 200) return 'epic';
+  if (exp >= 50) return 'rare';
+  return 'common';
+};
+
+const getDiscoveryDropRate = (monsterRarity: Rarity, difficulty: 'easy' | 'normal' | 'hard' = 'normal'): number => {
+  const baseRates: Record<Rarity, number> = {
+    common: 0.05,
+    rare: 0.1,
+    epic: 0.2,
+    legendary: 0.4,
+  };
+
+  const difficultyMultipliers: Record<string, number> = {
+    easy: 0.5,
+    normal: 1,
+    hard: 1.5,
+  };
+
+  return baseRates[monsterRarity] * difficultyMultipliers[difficulty];
+};
+
+export const rollBattleDiscovery = (
+  monsters: Monster[],
+  luck: number = 0,
+  difficulty: 'easy' | 'normal' | 'hard' = 'normal'
+): string[] => {
+  const discoveries: string[] = [];
+  const monsterOrTreasureDiscoveries = DISCOVERY_TEMPLATES.filter(
+    (d) => d.category === 'monster' || d.category === 'treasure'
+  );
+
+  if (monsterOrTreasureDiscoveries.length === 0) {
+    return discoveries;
+  }
+
+  for (const monster of monsters) {
+    const monsterRarity = getMonsterRarity(monster);
+    let dropRate = getDiscoveryDropRate(monsterRarity, difficulty);
+    dropRate = Math.min(1, dropRate * (1 + luck * 0.01));
+
+    if (Math.random() < dropRate) {
+      const eligibleDiscoveries = monsterOrTreasureDiscoveries.filter(
+        (d) => !discoveries.includes(d.id)
+      );
+
+      if (eligibleDiscoveries.length > 0) {
+        const weightedDiscoveries = eligibleDiscoveries.map((d) => {
+          const rarityWeights: Record<Rarity, number> = {
+            common: 50,
+            rare: 30,
+            epic: 15,
+            legendary: 5,
+          };
+          return {
+            item: d.id,
+            weight: rarityWeights[d.rarity],
+          };
+        });
+
+        const discoveryId = weightedRandomChoice(weightedDiscoveries);
+        discoveries.push(discoveryId);
+      }
+    }
+  }
+
+  return discoveries;
+};
+
+export interface BattleRewards {
+  exp: number;
+  resources: ResourceReward[];
+  discoveries: string[];
+}
+
 export const calculateBattleRewards = (
   monsters: Monster[],
-  victory: boolean
-): { exp: number; resources: { type: string; amount: number }[] } => {
+  victory: boolean,
+  luck: number = 0,
+  difficulty: 'easy' | 'normal' | 'hard' = 'normal'
+): BattleRewards => {
   if (!victory) {
-    return { exp: 0, resources: [] };
+    return { exp: 0, resources: [], discoveries: [] };
   }
 
   let totalExp = 0;
@@ -377,9 +458,11 @@ export const calculateBattleRewards = (
   }
 
   const resources = Array.from(resourceMap.entries()).map(([type, amount]) => ({
-    type,
+    type: type as ResourceReward['type'],
     amount,
   }));
 
-  return { exp: Math.floor(totalExp), resources };
+  const discoveries = rollBattleDiscovery(monsters, luck, difficulty);
+
+  return { exp: Math.floor(totalExp), resources, discoveries };
 };

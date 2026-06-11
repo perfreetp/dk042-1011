@@ -8,7 +8,23 @@ export type FacilityType = 'dock' | 'warehouse' | 'workshop' | 'hatchery';
 
 export type ExpeditionStatus = 'traveling' | 'battling' | 'collecting' | 'returning' | 'completed';
 
+export type ItemType = 'consumable' | 'material' | 'tool' | 'special';
+
 export type DiscoveryCategory = 'pet' | 'island' | 'monster' | 'treasure' | 'lore';
+
+export interface Item {
+  id: string;
+  name: string;
+  emoji: string;
+  description: string;
+  type: ItemType;
+  effect?: {
+    type: 'heal' | 'hatchBoost' | 'moodBoost' | 'staminaBoost';
+    value: number;
+  };
+  rarity: Rarity;
+  stackable: boolean;
+}
 
 export interface Skill {
   id: string;
@@ -121,11 +137,15 @@ export interface Order {
 export interface Expedition {
   islandId: string;
   startTime: number;
+  durationSeconds: number;
   status: ExpeditionStatus;
+  rewardsReady: boolean;
   battleWins: number;
   collected: ResourceReward[];
   logs: string[];
   discoveredItems: string[];
+  encounteredMonsters: string[];
+  battleLog: string[];
 }
 
 export interface Discovery {
@@ -144,6 +164,8 @@ export interface LogEntry {
   timestamp: number;
   message: string;
   type: 'info' | 'success' | 'warning' | 'danger';
+  relatedDiscoveryId?: string;
+  relatedIslandId?: string;
 }
 
 export interface Recipe {
@@ -181,6 +203,7 @@ export interface BattleState {
     resources: ResourceReward[];
     discoveries: string[];
   };
+  difficulty: 'easy' | 'normal' | 'hard';
 }
 
 export interface BattleAction {
@@ -220,5 +243,6 @@ export interface GameState {
   islandProgress: Record<string, number>;
   logs: LogEntry[];
   equipment: Equipment[];
+  inventory: Record<string, number>;
   lastOrderRefresh: number;
 }

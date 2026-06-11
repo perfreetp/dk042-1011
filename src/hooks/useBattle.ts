@@ -9,6 +9,7 @@ import { createMonsterFromTemplate } from '../data/monsters';
 import { useGameStore } from '../store/useGameStore';
 import { randomChoice } from '../utils/random';
 import { getIslandById } from '../data/islands';
+import { getDiscoveryById } from '../data/discoveries';
 
 interface UseBattleOptions {
   autoStart?: boolean;
@@ -34,12 +35,18 @@ export const useBattle = (options: UseBattleOptions = {}) => {
       resources: [],
       discoveries: [],
     },
+    difficulty: 'normal',
   });
 
   const gameStore = useGameStore();
 
   const initBattle = useCallback(
-    (playerPets: Pet[], monsterTemplateIds: string[], islandLevel: number = 1) => {
+    (
+      playerPets: Pet[],
+      monsterTemplateIds: string[],
+      levelMultiplier: number = 1,
+      difficulty: 'easy' | 'normal' | 'hard' = 'normal'
+    ) => {
       if (playerPets.length === 0 || monsterTemplateIds.length === 0) {
         return;
       }
@@ -55,13 +62,7 @@ export const useBattle = (options: UseBattleOptions = {}) => {
         return;
       }
 
-      const levelMultiplier = 1 + (islandLevel - 1) * 0.2;
-      const monsterCount = Math.min(monsterTemplateIds.length, 1 + Math.floor(islandLevel / 3));
-      const selectedTemplates: string[] = [];
-
-      for (let i = 0; i < monsterCount; i++) {
-        selectedTemplates.push(randomChoice(monsterTemplateIds));
-      }
+      const selectedTemplates = [...monsterTemplateIds];
 
       const enemies: Monster[] = selectedTemplates
         .map((id, idx) =>
@@ -83,10 +84,17 @@ export const useBattle = (options: UseBattleOptions = {}) => {
           resources: [],
           discoveries: [],
         },
+        difficulty,
       });
     },
     []
   );
+
+  const getDifficultyFromLevel = (level: number): 'easy' | 'normal' | 'hard' => {
+    if (level <= 2) return 'easy';
+    if (level <= 5) return 'normal';
+    return 'hard';
+  };
 
   const initBattleFromIsland = useCallback(
     (islandId: string, teamPetIds: string[], pets: Pet[]) => {
@@ -103,7 +111,15 @@ export const useBattle = (options: UseBattleOptions = {}) => {
         return false;
       }
 
-      initBattle(teamPets, island.monsters, island.level);
+      const levelMultiplier = 1 + (island.level - 1) * 0.2;
+      const monsterCount = Math.min(island.monsters.length, 1 + Math.floor(island.level / 3));
+      const selectedMonsters: string[] = [];
+      for (let i = 0; i < monsterCount; i++) {
+        selectedMonsters.push(randomChoice(island.monsters));
+      }
+
+      const difficulty = getDifficultyFromLevel(island.level);
+      initBattle(teamPets, selectedMonsters, levelMultiplier, difficulty);
       return true;
     },
     [initBattle]
@@ -126,17 +142,27 @@ export const useBattle = (options: UseBattleOptions = {}) => {
 
       let newPhase: BattleState['phase'] = prev.phase;
       let finalRewards = prev.rewards;
+      const extraLogs: string[] = [];
 
       if (result.battleEnded && result.winner) {
         newPhase = result.winner === 'player' ? 'playerWin' : 'enemyWin';
 
         if (result.winner === 'player') {
-          const rewards = calculateBattleRewards(prev.enemyTeam, true);
+          const rewards = calculateBattleRewards(prev.enemyTeam, true, 0, prev.difficulty);
           finalRewards = {
             exp: rewards.exp,
-            resources: rewards.resources as ResourceReward[],
-            discoveries: [],
+            resources: rewards.resources,
+            discoveries: rewards.discoveries,
           };
+
+          if (rewards.discoveries.length > 0) {
+            for (const discoveryId of rewards.discoveries) {
+              const discovery = getDiscoveryById(discoveryId);
+              if (discovery) {
+                extraLogs.push(`✨ 发现了 ${discovery.emoji}${discovery.name}！`);
+              }
+            }
+          }
         }
       }
 
@@ -147,7 +173,7 @@ export const useBattle = (options: UseBattleOptions = {}) => {
         turn: prev.turn + 1,
         phase: newPhase,
         actionQueue: [...prev.actionQueue, ...result.actions],
-        battleLog: [...prev.battleLog, ...result.logs],
+        battleLog: [...prev.battleLog, ...result.logs, ...extraLogs],
         synergyEnergy: newSynergyEnergy,
         rewards: finalRewards,
       };
@@ -183,18 +209,28 @@ export const useBattle = (options: UseBattleOptions = {}) => {
 
       let newPhase: BattleState['phase'] = prev.phase;
       let finalRewards = prev.rewards;
+      const extraLogs: string[] = [];
 
       const aliveMonsters = result.updatedMonsters.filter((m) => m.hp > 0);
       const alivePets = prev.playerTeam.filter((p) => p.hp > 0);
 
       if (aliveMonsters.length === 0) {
         newPhase = 'playerWin';
-        const rewards = calculateBattleRewards(prev.enemyTeam, true);
+        const rewards = calculateBattleRewards(prev.enemyTeam, true, 0, prev.difficulty);
         finalRewards = {
           exp: rewards.exp,
-          resources: rewards.resources as ResourceReward[],
-          discoveries: [],
+          resources: rewards.resources,
+          discoveries: rewards.discoveries,
         };
+
+        if (rewards.discoveries.length > 0) {
+          for (const discoveryId of rewards.discoveries) {
+            const discovery = getDiscoveryById(discoveryId);
+            if (discovery) {
+              extraLogs.push(`✨ 发现了 ${discovery.emoji}${discovery.name}！`);
+            }
+          }
+        }
       } else if (alivePets.length === 0) {
         newPhase = 'enemyWin';
       }
@@ -206,7 +242,7 @@ export const useBattle = (options: UseBattleOptions = {}) => {
         enemyTeam: result.updatedMonsters,
         phase: newPhase,
         actionQueue: [...prev.actionQueue, ...result.actions],
-        battleLog: [...prev.battleLog, ...result.logs],
+        battleLog: [...prev.battleLog, ...result.logs, ...extraLogs],
         synergyEnergy: 0,
         rewards: finalRewards,
       };
@@ -258,6 +294,12 @@ export const useBattle = (options: UseBattleOptions = {}) => {
         const expPerPet = Math.floor(state.rewards.exp / state.playerTeam.length);
         state.playerTeam.forEach((pet) => {
           gameStore.addPetExp(pet.id, expPerPet);
+        });
+      }
+
+      if (state.rewards.discoveries.length > 0) {
+        state.rewards.discoveries.forEach((discoveryId) => {
+          gameStore.addDiscovery(discoveryId);
         });
       }
 
@@ -316,6 +358,7 @@ export const useBattle = (options: UseBattleOptions = {}) => {
         resources: [],
         discoveries: [],
       },
+      difficulty: 'normal',
     });
   }, []);
 

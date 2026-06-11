@@ -11,6 +11,42 @@ export const DISCOVERY_TEMPLATES: Omit<Discovery, 'foundAt'>[] = [
     referenceId: 'island-shell',
   },
   {
+    id: 'discovery-coral',
+    name: '红珊瑚',
+    emoji: '🪸',
+    rarity: 'rare',
+    category: 'treasure',
+    description: '深海中生长的珍贵红珊瑚，色泽鲜艳夺目',
+    referenceId: 'island-shell',
+  },
+  {
+    id: 'discovery-amber',
+    name: '远古琥珀',
+    emoji: '🟠',
+    rarity: 'epic',
+    category: 'treasure',
+    description: '封存着远古昆虫的琥珀，记录着千万年前的生命',
+    referenceId: 'island-herb',
+  },
+  {
+    id: 'discovery-fossil',
+    name: '远古化石',
+    emoji: '🦴',
+    rarity: 'epic',
+    category: 'treasure',
+    description: '远古生物的化石遗骸，见证了地球的变迁',
+    referenceId: 'island-mine',
+  },
+  {
+    id: 'discovery-ancient-coin',
+    name: '远古金币',
+    emoji: '🪙',
+    rarity: 'rare',
+    category: 'treasure',
+    description: '刻有神秘符文的远古金币，来自失落的文明',
+    referenceId: 'island-mine',
+  },
+  {
     id: 'discovery-ancient-herb',
     name: '千年灵芝',
     emoji: '🍄',
@@ -143,4 +179,8 @@ export const getDiscoveriesByRarity = (rarity: Rarity): Omit<Discovery, 'foundAt
 
 export const getDiscoveriesByCategory = (category: DiscoveryCategory): Omit<Discovery, 'foundAt'>[] => {
   return DISCOVERY_TEMPLATES.filter((d) => d.category === category);
+};
+
+export const getDiscoveriesForIsland = (islandId: string): Omit<Discovery, 'foundAt'>[] => {
+  return DISCOVERY_TEMPLATES.filter((d) => d.referenceId === islandId);
 };

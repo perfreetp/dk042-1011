@@ -1,4 +1,5 @@
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { useEffect } from 'react';
 import Header from '@/components/Header';
 import Camp from '@/pages/Camp';
 import Hut from '@/pages/Hut';
@@ -6,6 +7,8 @@ import MapPage from '@/pages/MapPage';
 import Workshop from '@/pages/Workshop';
 import Battle from '@/pages/Battle';
 import Collection from '@/pages/Collection';
+import { initializeGameStore } from '@/store/useGameStore';
+import useAutoSave from '@/hooks/useAutoSave';
 
 function AnimatedRoutes() {
   const location = useLocation();
@@ -24,6 +27,12 @@ function AnimatedRoutes() {
 }
 
 export default function App() {
+  useAutoSave();
+
+  useEffect(() => {
+    initializeGameStore();
+  }, []);
+
   return (
     <Router>
       <div className="relative z-10 min-h-screen flex flex-col">

@@ -4,6 +4,7 @@ import { useBattle } from '../hooks/useBattle';
 import { useGameStore } from '../store/useGameStore';
 import { createMonsterFromTemplate } from '../data/monsters';
 import { SYNERGY_SKILLS } from '../data/pets';
+import { getDiscoveryById } from '../data/discoveries';
 import { RESOURCE_NAMES, RESOURCE_EMOJIS, PET_TYPE_COLORS, PET_TYPE_NAMES } from '../utils/formatters';
 import { cn } from '../lib/utils';
 import type { Pet, Monster, ResourceReward, PetType } from '../types';
@@ -225,7 +226,7 @@ export default function Battle() {
     resetBattle();
     setHasFinalized(false);
     setAutoBattle(false);
-    initBattle(teamPets, monsterIds, config.levelMultiplier);
+    initBattle(teamPets, monsterIds, config.levelMultiplier, selectedDifficulty);
 
     setTimeout(() => {
       setAutoBattle(true);
@@ -572,6 +573,32 @@ export default function Battle() {
                   </p>
                   <div className="text-white/70 text-xs md:text-sm font-game">
                     每只宠物获得 +{expPerPet} EXP
+                  </div>
+                </div>
+              )}
+
+              {rewards.discoveries.length > 0 && (
+                <div className="mt-4 p-4 rounded-xl bg-gradient-to-br from-purple-500/20 to-pink-500/10 border border-purple-400/40 max-w-2xl mx-auto reward-pop" style={{ animationDelay: '400ms' }}>
+                  <p className="text-purple-200 font-game text-sm md:text-base mb-3">
+                    ✨ 稀有发现
+                  </p>
+                  <div className="flex flex-wrap justify-center gap-2">
+                    {rewards.discoveries.map((discoveryId, idx) => {
+                      const discovery = getDiscoveryById(discoveryId);
+                      if (!discovery) return null;
+                      return (
+                        <div
+                          key={idx}
+                          className="flex items-center gap-2 px-3 py-2 rounded-lg bg-purple-500/20 border border-purple-400/30"
+                        >
+                          <span className="text-xl">{discovery.emoji}</span>
+                          <div>
+                            <p className="text-white text-sm font-game">{discovery.name}</p>
+                            <p className="text-purple-300 text-xs font-game">[{discovery.rarity}]</p>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               )}
