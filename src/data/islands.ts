@@ -28,11 +28,12 @@ export const ISLANDS: Island[] = [
     rareDrops: ['discovery-pearl'],
     description: '潮间带遍布各种美丽的贝壳，低等级怪物出没',
     duration: 30000,
+    toolDrops: [{ itemId: 'shell-net', probability: 0.1 }],
   },
   {
     id: 'island-herb',
     name: '草药密林',
-    emoji: '�',
+    emoji: '🌿',
     level: 2,
     unlocked: true,
     x: 35,
@@ -42,6 +43,7 @@ export const ISLANDS: Island[] = [
     rareDrops: ['discovery-ancient-herb'],
     description: '郁郁葱葱的森林，生长着各种珍贵草药',
     duration: 45000,
+    toolDrops: [{ itemId: 'harvest-sickle', probability: 0.15 }],
     unlockRequirement: { islandId: 'island-shell', progress: 50 },
   },
   {
@@ -57,6 +59,7 @@ export const ISLANDS: Island[] = [
     rareDrops: ['discovery-crystal'],
     description: '古老的矿山峡谷，蕴含丰富矿藏但危险重重',
     duration: 60000,
+    toolDrops: [{ itemId: 'miner-pickaxe', probability: 0.2 }],
     unlockRequirement: { islandId: 'island-herb', progress: 60 },
   },
   {
@@ -72,12 +75,16 @@ export const ISLANDS: Island[] = [
     rareDrops: ['discovery-holy-relic'],
     description: '高耸入云的圣山，传说中藏有远古神器',
     duration: 90000,
+    toolDrops: [
+      { itemId: 'harvest-sickle', probability: 0.2 },
+      { itemId: 'shell-net', probability: 0.2 },
+    ],
     unlockRequirement: { islandId: 'island-mine', progress: 70 },
   },
   {
     id: 'island-volcano',
     name: '烈焰火山',
-    emoji: '�',
+    emoji: '🌋',
     level: 5,
     unlocked: false,
     x: 75,
@@ -87,6 +94,7 @@ export const ISLANDS: Island[] = [
     rareDrops: ['discovery-phoenix-feather'],
     description: '喷发着岩浆的活火山，栖息着强大的火焰生物',
     duration: 120000,
+    toolDrops: [{ itemId: 'miner-pickaxe', probability: 0.25 }],
     unlockRequirement: { islandId: 'island-light', progress: 80 },
   },
   {
@@ -102,12 +110,16 @@ export const ISLANDS: Island[] = [
     rareDrops: ['discovery-trident'],
     description: '深不见底的海渊，传说中克苏鲁沉睡之地',
     duration: 180000,
+    toolDrops: [
+      { itemId: 'shell-net', probability: 0.25 },
+      { itemId: 'miner-pickaxe', probability: 0.25 },
+    ],
     unlockRequirement: { islandId: 'island-volcano', progress: 90 },
   },
   {
     id: 'island-dragon',
     name: '龙之巢穴',
-    emoji: '�',
+    emoji: '🐲',
     level: 10,
     unlocked: false,
     x: 92,
@@ -117,6 +129,11 @@ export const ISLANDS: Island[] = [
     rareDrops: ['discovery-dragon-scale', 'discovery-world-tree'],
     description: '传说中的最终之地，远古巨龙的巢穴',
     duration: 300000,
+    toolDrops: [
+      { itemId: 'miner-pickaxe', probability: 0.3 },
+      { itemId: 'harvest-sickle', probability: 0.3 },
+      { itemId: 'shell-net', probability: 0.3 },
+    ],
     unlockRequirement: { islandId: 'island-abyss', progress: 100 },
   },
 ];

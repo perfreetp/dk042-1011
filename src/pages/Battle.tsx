@@ -5,6 +5,7 @@ import { useGameStore } from '../store/useGameStore';
 import { createMonsterFromTemplate } from '../data/monsters';
 import { SYNERGY_SKILLS } from '../data/pets';
 import { getDiscoveryById } from '../data/discoveries';
+import { getItemById } from '../data/items';
 import { RESOURCE_NAMES, RESOURCE_EMOJIS, PET_TYPE_COLORS, PET_TYPE_NAMES } from '../utils/formatters';
 import { cn } from '../lib/utils';
 import type { Pet, Monster, ResourceReward, PetType } from '../types';
@@ -81,6 +82,8 @@ export default function Battle() {
   const [showFlash, setShowFlash] = useState(false);
   const [hasFinalized, setHasFinalized] = useState(false);
   const [battleRecordId, setBattleRecordId] = useState<string | undefined>(undefined);
+  const [useLuckyCharm, setUseLuckyCharm] = useState(false);
+  const [itemsGained, setItemsGained] = useState<string[]>([]);
 
   const logEndRef = useRef<HTMLDivElement>(null);
   const battleTimer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -90,6 +93,8 @@ export default function Battle() {
   useEffect(() => {
     roundDelayRef.current = roundDelay;
   }, [roundDelay]);
+
+  const luckyCharmCount = gameStore.inventory['lucky-charm'] || 0;
 
   const {
     battleState,
@@ -103,6 +108,8 @@ export default function Battle() {
     isPlayerWin,
     isEnemyWin,
     isFinished,
+    confirmUseLuckyCharm,
+    usedLuckyCharmInBattle,
   } = useBattle({ roundDelay });
 
   const teamPets = useMemo(() => {
@@ -214,6 +221,9 @@ export default function Battle() {
         if (result?.battleRecordId) {
           setBattleRecordId(result.battleRecordId);
         }
+        if (result?.itemsGained && result.itemsGained.length > 0) {
+          setItemsGained(result.itemsGained);
+        }
       }, 500);
     }
   }, [isFinished, hasFinalized, finalizeBattle]);
@@ -227,11 +237,21 @@ export default function Battle() {
       monsterIds.push(config.monsterPool[i % config.monsterPool.length]);
     }
 
+    if (useLuckyCharm) {
+      const success = confirmUseLuckyCharm();
+      if (!success) {
+        alert('幸运符数量不足！');
+        setUseLuckyCharm(false);
+        return;
+      }
+    }
+
     resetBattle();
     setHasFinalized(false);
     setAutoBattle(false);
     setBattleRecordId(undefined);
-    initBattle(teamPets, monsterIds, config.levelMultiplier, selectedDifficulty);
+    setItemsGained([]);
+    initBattle(teamPets, monsterIds, config.levelMultiplier, selectedDifficulty, useLuckyCharm);
 
     setTimeout(() => {
       setAutoBattle(true);
@@ -479,6 +499,35 @@ export default function Battle() {
             </div>
           )}
 
+          <div className="bg-gradient-to-r from-emerald-500/20 to-teal-500/20 rounded-xl p-4 border border-emerald-400/30 mb-6 md:mb-8">
+            <label className={cn(
+              'flex items-center gap-3 cursor-pointer',
+              luckyCharmCount === 0 && 'cursor-not-allowed opacity-60'
+            )}>
+              <input
+                type="checkbox"
+                checked={useLuckyCharm}
+                onChange={(e) => setUseLuckyCharm(e.target.checked)}
+                disabled={luckyCharmCount === 0}
+                className="w-5 h-5 rounded border-emerald-400 text-emerald-500 focus:ring-emerald-400 bg-black/30"
+              />
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-lg">🍀</span>
+                  <span className="font-game text-white/90 text-sm font-bold">使用幸运符</span>
+                  <span className="font-game text-white/50 text-xs">
+                    (背包: {luckyCharmCount})
+                  </span>
+                </div>
+                {luckyCharmCount === 0 ? (
+                  <p className="text-white/40 text-xs mt-1 ml-7">背包无幸运符，请前往工坊制作</p>
+                ) : useLuckyCharm ? (
+                  <p className="text-emerald-300/80 text-xs mt-1 ml-7">将消耗1个幸运符🍀，大幅提升发现概率</p>
+                ) : null}
+              </div>
+            </label>
+          </div>
+
           <div className="text-center">
             <button
               onClick={handleStartBattle}
@@ -512,6 +561,9 @@ export default function Battle() {
             )}
           >
             {isPlayerWin ? '🎉 战斗胜利！' : '💀 战斗失败...'}
+            {isPlayerWin && usedLuckyCharmInBattle && (
+              <span className="ml-2 text-2xl md:text-4xl">🍀</span>
+            )}
           </div>
 
           <div className="flex justify-center gap-4 mb-6 md:mb-8">
@@ -551,6 +603,11 @@ export default function Battle() {
                     📖 冒险记录已生成
                   </span>
                 )}
+                {usedLuckyCharmInBattle && (
+                  <span className="text-xs font-game text-green-300 bg-green-500/20 px-2.5 py-1 rounded-lg border border-green-400/30">
+                    🍀 幸运符生效
+                  </span>
+                )}
               </div>
 
               {rewards.resources.length > 0 && (
@@ -572,6 +629,32 @@ export default function Battle() {
                       </p>
                     </div>
                   ))}
+                </div>
+              )}
+
+              {itemsGained.length > 0 && (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4 max-w-2xl mx-auto">
+                  {itemsGained.map((itemId, idx) => {
+                    const item = getItemById(itemId);
+                    if (!item) return null;
+                    return (
+                      <div
+                        key={`${itemId}-${idx}`}
+                        className="p-3 md:p-4 rounded-xl bg-gradient-to-br from-blue-500/20 to-indigo-500/10 border border-blue-400/40 reward-pop"
+                        style={{ animationDelay: `${(rewards.resources.length + idx) * 100}ms` }}
+                      >
+                        <div className="text-2xl md:text-3xl mb-1">
+                          {item.emoji}
+                        </div>
+                        <p className="text-white/80 text-xs md:text-sm font-game">
+                          {item.name}
+                        </p>
+                        <p className="text-blue-300 font-title text-lg md:text-xl">
+                          +1
+                        </p>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
 
@@ -633,6 +716,9 @@ export default function Battle() {
                       <span className="text-white">
                         {selectedDifficulty === 'easy' ? '🌱 简单' : selectedDifficulty === 'normal' ? '⚔️ 普通' : '💀 困难'}
                       </span>
+                      {usedLuckyCharmInBattle && (
+                        <span className="text-green-400 ml-2">🍀 使用了幸运符</span>
+                      )}
                     </div>
 
                     <div>
@@ -652,6 +738,26 @@ export default function Battle() {
                         ))}
                       </div>
                     </div>
+
+                    {itemsGained.length > 0 && (
+                      <div>
+                        <span className="text-white/60">获得工具：</span>
+                        <div className="flex flex-wrap gap-1.5 mt-1">
+                          {itemsGained.map((itemId, idx) => {
+                            const item = getItemById(itemId);
+                            if (!item) return null;
+                            return (
+                              <span
+                                key={`${itemId}-${idx}`}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-blue-500/20 text-blue-300 border border-blue-400/30"
+                              >
+                                {item.emoji} {item.name}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
 
                     {rewards.discoveries.length > 0 && (
                       <div>
@@ -682,7 +788,7 @@ export default function Battle() {
                   </div>
 
                   <button
-                    onClick={() => navigate('/collection?tab=adventures')}
+                    onClick={() => navigate(`/collection?tab=adventures&record=${battleRecordId}`)}
                     className="mt-3 w-full py-2 rounded-lg bg-emerald-500/20 border border-emerald-400/30 text-emerald-300 text-sm font-game hover:bg-emerald-500/30 transition-all"
                   >
                     📖 查看完整记录
@@ -725,6 +831,7 @@ export default function Battle() {
       <div className="glass-card rounded-2xl p-3 md:p-5 card-shadow">
         <h2 className="font-title text-2xl md:text-3xl text-white mb-3 md:mb-4 drop-shadow text-center">
           ⚔️ 遭遇战 - 第 {battleState.turn} 回合
+          {usedLuckyCharmInBattle && <span className="ml-2 text-2xl">🍀</span>}
         </h2>
 
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-3 md:gap-4">

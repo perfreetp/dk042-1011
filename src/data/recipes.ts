@@ -138,6 +138,42 @@ export const RECIPES: Recipe[] = [
     output: { itemId: 'lucky-charm', amount: 1 },
     requiredWorkshopLevel: 5,
   },
+  {
+    id: 'recipe-tool-miner-pickaxe',
+    name: '矿工镐',
+    emoji: '⛏️',
+    description: '专业的采矿工具，大幅提升矿石采集效率',
+    materials: [
+      { type: 'ore', amount: 15 },
+      { type: 'shell', amount: 3 },
+    ],
+    output: { itemId: 'miner-pickaxe', amount: 1 },
+    requiredWorkshopLevel: 2,
+  },
+  {
+    id: 'recipe-tool-harvest-sickle',
+    name: '采集镰刀',
+    emoji: '🌾',
+    description: '锋利的采集工具，大幅提升草药采集效率',
+    materials: [
+      { type: 'herb', amount: 15 },
+      { type: 'shell', amount: 3 },
+    ],
+    output: { itemId: 'harvest-sickle', amount: 1 },
+    requiredWorkshopLevel: 2,
+  },
+  {
+    id: 'recipe-tool-shell-net',
+    name: '贝壳网兜',
+    emoji: '🪣',
+    description: '特制的打捞工具，大幅提升贝壳采集效率',
+    materials: [
+      { type: 'shell', amount: 15 },
+      { type: 'ore', amount: 3 },
+    ],
+    output: { itemId: 'shell-net', amount: 1 },
+    requiredWorkshopLevel: 2,
+  },
 ];
 
 export const getRecipeById = (id: string): Recipe | undefined => {

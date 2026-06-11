@@ -12,6 +12,36 @@ export type ItemType = 'consumable' | 'material' | 'tool' | 'special';
 
 export type DiscoveryCategory = 'pet' | 'island' | 'monster' | 'treasure' | 'lore';
 
+export type AdventureNodeType = 'depart' | 'collect' | 'encounter' | 'discover' | 'claim' | 'start_battle' | 'victory' | 'defeat';
+
+export interface ToolDrop {
+  itemId: string;
+  probability: number;
+}
+
+export interface AdventureNode {
+  id: string;
+  type: AdventureNodeType;
+  timestamp: number;
+  title?: string;
+  description?: string;
+  islandName?: string;
+  islandEmoji?: string;
+  message?: string;
+  difficulty?: 'easy' | 'normal' | 'hard';
+  usedLuckyCharm?: boolean;
+  expChange?: number;
+  won?: boolean;
+  teamSnapshot?: { id: string; name: string; emoji: string; level: number; hp?: number; maxHp?: number }[];
+  resourceChanges?: { type: ResourceType; amount: number; delta?: number; itemId?: string; itemName?: string }[];
+  monsterIds?: string[];
+  monsterDetails?: { templateId: string; name: string; emoji: string; defeated: boolean }[];
+  discoveryIds?: string[];
+  discoveryDetails?: { id: string; name: string; emoji: string; rarity: Rarity; category?: DiscoveryCategory }[];
+  expDelta?: number;
+  itemChanges?: { itemId: string; itemName: string; itemEmoji: string; amount: number; delta?: number }[];
+}
+
 export interface Item {
   id: string;
   name: string;
@@ -90,6 +120,7 @@ export interface MonsterTemplate {
   baseSpeed: number;
   rewards: ResourceReward[];
   expReward: number;
+  toolDrops: ToolDrop[];
 }
 
 export interface Monster {
@@ -105,6 +136,7 @@ export interface Monster {
   speed: number;
   rewards: ResourceReward[];
   expReward: number;
+  toolDrops: ToolDrop[];
 }
 
 export interface Island {
@@ -120,6 +152,7 @@ export interface Island {
   rareDrops: string[];
   description: string;
   duration: number;
+  toolDrops?: ToolDrop[];
   unlockRequirement?: { islandId: string; progress: number };
 }
 
@@ -151,6 +184,8 @@ export interface AdventureRecord {
   expGained: number;
   usedLuckyCharm: boolean;
   summary: string;
+  nodes: AdventureNode[];
+  itemsGained: { itemId: string; amount: number }[];
 }
 
 export interface Expedition {
@@ -169,6 +204,7 @@ export interface Expedition {
   lockedTeamSnapshots: { id: string; name: string; emoji: string; level: number }[];
   usedLuckyCharm: boolean;
   adventureRecordId?: string;
+  pendingItems: { itemId: string; amount: number }[];
 }
 
 export interface Discovery {

@@ -15,11 +15,12 @@ export const MONSTER_TEMPLATES: MonsterTemplate[] = [
       { type: 'exp', amount: 20 },
     ],
     expReward: 25,
+    toolDrops: [{ itemId: 'harvest-sickle', probability: 0.03 }],
   },
   {
     id: 'monster-fire-wolf',
     name: '火狼',
-    emoji: '�',
+    emoji: '🐺',
     type: 'fire',
     baseHp: 80,
     baseAttack: 22,
@@ -31,11 +32,12 @@ export const MONSTER_TEMPLATES: MonsterTemplate[] = [
       { type: 'exp', amount: 35 },
     ],
     expReward: 40,
+    toolDrops: [{ itemId: 'harvest-sickle', probability: 0.06 }],
   },
   {
     id: 'monster-rock-golem',
     name: '岩石傀儡',
-    emoji: '�',
+    emoji: '🗿',
     type: 'earth',
     baseHp: 150,
     baseAttack: 18,
@@ -47,6 +49,7 @@ export const MONSTER_TEMPLATES: MonsterTemplate[] = [
       { type: 'exp', amount: 45 },
     ],
     expReward: 55,
+    toolDrops: [{ itemId: 'miner-pickaxe', probability: 0.08 }],
   },
   {
     id: 'monster-harpy',
@@ -63,11 +66,12 @@ export const MONSTER_TEMPLATES: MonsterTemplate[] = [
       { type: 'exp', amount: 38 },
     ],
     expReward: 45,
+    toolDrops: [{ itemId: 'shell-net', probability: 0.07 }],
   },
   {
     id: 'monster-shadow',
     name: '暗影刺客',
-    emoji: '�',
+    emoji: '👤',
     type: 'dark',
     baseHp: 90,
     baseAttack: 30,
@@ -79,6 +83,11 @@ export const MONSTER_TEMPLATES: MonsterTemplate[] = [
       { type: 'exp', amount: 60 },
     ],
     expReward: 70,
+    toolDrops: [
+      { itemId: 'miner-pickaxe', probability: 0.05 },
+      { itemId: 'harvest-sickle', probability: 0.05 },
+      { itemId: 'shell-net', probability: 0.05 },
+    ],
   },
   {
     id: 'monster-angel',
@@ -95,6 +104,11 @@ export const MONSTER_TEMPLATES: MonsterTemplate[] = [
       { type: 'exp', amount: 75 },
     ],
     expReward: 85,
+    toolDrops: [
+      { itemId: 'miner-pickaxe', probability: 0.06 },
+      { itemId: 'harvest-sickle', probability: 0.06 },
+      { itemId: 'shell-net', probability: 0.06 },
+    ],
   },
   {
     id: 'monster-sea-serpent',
@@ -111,6 +125,7 @@ export const MONSTER_TEMPLATES: MonsterTemplate[] = [
       { type: 'exp', amount: 55 },
     ],
     expReward: 65,
+    toolDrops: [{ itemId: 'shell-net', probability: 0.1 }],
   },
   {
     id: 'monster-kraken',
@@ -128,6 +143,10 @@ export const MONSTER_TEMPLATES: MonsterTemplate[] = [
       { type: 'exp', amount: 200 },
     ],
     expReward: 250,
+    toolDrops: [
+      { itemId: 'shell-net', probability: 0.2 },
+      { itemId: 'miner-pickaxe', probability: 0.1 },
+    ],
   },
   {
     id: 'monster-phoenix',
@@ -144,11 +163,15 @@ export const MONSTER_TEMPLATES: MonsterTemplate[] = [
       { type: 'exp', amount: 220 },
     ],
     expReward: 280,
+    toolDrops: [
+      { itemId: 'harvest-sickle', probability: 0.18 },
+      { itemId: 'shell-net', probability: 0.1 },
+    ],
   },
   {
     id: 'monster-dragon',
     name: '远古巨龙',
-    emoji: '�',
+    emoji: '🐉',
     type: 'fire',
     baseHp: 500,
     baseAttack: 55,
@@ -162,6 +185,11 @@ export const MONSTER_TEMPLATES: MonsterTemplate[] = [
       { type: 'exp', amount: 400 },
     ],
     expReward: 500,
+    toolDrops: [
+      { itemId: 'miner-pickaxe', probability: 0.25 },
+      { itemId: 'harvest-sickle', probability: 0.2 },
+      { itemId: 'shell-net', probability: 0.2 },
+    ],
   },
 ];
 
@@ -192,6 +220,7 @@ export const createMonsterFromTemplate = (
       amount: Math.floor(r.amount * mult),
     })),
     expReward: Math.floor(template.expReward * mult),
+    toolDrops: template.toolDrops,
   };
 };
 

@@ -21,6 +21,8 @@ export const useBattle = (options: UseBattleOptions = {}) => {
   const roundTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isProcessing = useRef<boolean>(false);
 
+  const [usedLuckyCharmInBattle, setUsedLuckyCharmInBattle] = useState<boolean>(false);
+
   const [battleState, setBattleState] = useState<BattleState>({
     playerTeam: [],
     enemyTeam: [],
@@ -40,15 +42,30 @@ export const useBattle = (options: UseBattleOptions = {}) => {
 
   const gameStore = useGameStore();
 
+  const confirmUseLuckyCharm = useCallback((): boolean => {
+    const success = useGameStore.getState().removeItem('lucky-charm', 1);
+    if (success) {
+      setUsedLuckyCharmInBattle(true);
+      useGameStore.getState().addLog('🍀 战斗前消耗了1个幸运符，发现概率大幅提升！', 'success');
+      return true;
+    }
+    return false;
+  }, []);
+
   const initBattle = useCallback(
     (
       playerPets: Pet[],
       monsterTemplateIds: string[],
       levelMultiplier: number = 1,
-      difficulty: 'easy' | 'normal' | 'hard' = 'normal'
+      difficulty: 'easy' | 'normal' | 'hard' = 'normal',
+      useLuckyCharm?: boolean
     ) => {
       if (playerPets.length === 0 || monsterTemplateIds.length === 0) {
         return;
+      }
+
+      if (useLuckyCharm !== undefined) {
+        setUsedLuckyCharmInBattle(!!useLuckyCharm);
       }
 
       const alivePets = playerPets
@@ -97,7 +114,7 @@ export const useBattle = (options: UseBattleOptions = {}) => {
   };
 
   const initBattleFromIsland = useCallback(
-    (islandId: string, teamPetIds: string[], pets: Pet[]) => {
+    (islandId: string, teamPetIds: string[], pets: Pet[], useLuckyCharm?: boolean) => {
       const island = getIslandById(islandId);
       if (!island || island.monsters.length === 0) {
         return false;
@@ -119,7 +136,7 @@ export const useBattle = (options: UseBattleOptions = {}) => {
       }
 
       const difficulty = getDifficultyFromLevel(island.level);
-      initBattle(teamPets, selectedMonsters, levelMultiplier, difficulty);
+      initBattle(teamPets, selectedMonsters, levelMultiplier, difficulty, useLuckyCharm);
       return true;
     },
     [initBattle]
@@ -148,8 +165,7 @@ export const useBattle = (options: UseBattleOptions = {}) => {
         newPhase = result.winner === 'player' ? 'playerWin' : 'enemyWin';
 
         if (result.winner === 'player') {
-          const hasLuckyCharm = (useGameStore.getState().inventory['lucky-charm'] || 0) > 0;
-          const rewards = calculateBattleRewards(prev.enemyTeam, true, 0, prev.difficulty, hasLuckyCharm);
+          const rewards = calculateBattleRewards(prev.enemyTeam, true, 0, prev.difficulty, usedLuckyCharmInBattle);
           finalRewards = {
             exp: rewards.exp,
             resources: rewards.resources,
@@ -185,7 +201,7 @@ export const useBattle = (options: UseBattleOptions = {}) => {
     setTimeout(() => {
       isProcessing.current = false;
     }, 100);
-  }, []);
+  }, [usedLuckyCharmInBattle]);
 
   const useSynergy = useCallback((): boolean => {
     let success = false;
@@ -217,8 +233,7 @@ export const useBattle = (options: UseBattleOptions = {}) => {
 
       if (aliveMonsters.length === 0) {
         newPhase = 'playerWin';
-        const hasLuckyCharm = (useGameStore.getState().inventory['lucky-charm'] || 0) > 0;
-        const rewards = calculateBattleRewards(prev.enemyTeam, true, 0, prev.difficulty, hasLuckyCharm);
+        const rewards = calculateBattleRewards(prev.enemyTeam, true, 0, prev.difficulty, usedLuckyCharmInBattle);
         finalRewards = {
           exp: rewards.exp,
           resources: rewards.resources,
@@ -251,7 +266,7 @@ export const useBattle = (options: UseBattleOptions = {}) => {
     });
 
     return success;
-  }, []);
+  }, [usedLuckyCharmInBattle]);
 
   const autoBattle = useCallback(() => {
     if (roundTimer.current) {
@@ -287,8 +302,26 @@ export const useBattle = (options: UseBattleOptions = {}) => {
 
     const state = battleState;
     let battleRecordId: string | undefined;
+    const itemsGained: string[] = [];
 
     if (state.phase === 'playerWin') {
+      for (const monster of state.enemyTeam) {
+        if (monster.hp <= 0 && monster.toolDrops && monster.toolDrops.length > 0) {
+          for (const drop of monster.toolDrops) {
+            const roll = Math.random();
+            if (roll < drop.probability) {
+              itemsGained.push(drop.itemId);
+            }
+          }
+        }
+      }
+
+      if (itemsGained.length > 0) {
+        for (const itemId of itemsGained) {
+          gameStore.addItem(itemId, 1);
+        }
+      }
+
       if (state.rewards.resources.length > 0) {
         gameStore.addResources(state.rewards.resources);
       }
@@ -312,7 +345,6 @@ export const useBattle = (options: UseBattleOptions = {}) => {
         }
       });
 
-      const hasLuckyCharm = (useGameStore.getState().inventory['lucky-charm'] || 0) > 0;
       battleRecordId = gameStore.createBattleRecord({
         difficulty: state.difficulty,
         teamPetIds: state.playerTeam.map((p) => p.id),
@@ -331,10 +363,33 @@ export const useBattle = (options: UseBattleOptions = {}) => {
         discoveries: state.rewards.discoveries,
         expGained: state.rewards.exp,
         resources: state.rewards.resources,
-        usedLuckyCharm: hasLuckyCharm,
+        usedLuckyCharm: usedLuckyCharmInBattle,
+        won: true,
       });
     } else if (state.phase === 'enemyWin') {
       gameStore.addLog('战斗失败...队伍需要休息', 'danger');
+
+      gameStore.createBattleRecord({
+        difficulty: state.difficulty,
+        teamPetIds: state.playerTeam.map((p) => p.id),
+        teamPetSnapshots: state.playerTeam.map((p) => ({
+          id: p.id,
+          name: p.name,
+          emoji: p.emoji,
+          level: p.level,
+        })),
+        monsters: state.enemyTeam.map((m) => ({
+          templateId: m.templateId,
+          name: m.name,
+          emoji: m.emoji,
+          defeated: m.hp <= 0,
+        })),
+        discoveries: state.rewards.discoveries,
+        expGained: state.rewards.exp,
+        resources: state.rewards.resources,
+        usedLuckyCharm: usedLuckyCharmInBattle,
+        won: false,
+      });
 
       state.playerTeam.forEach((pet) => {
         if (pet.hp <= 0) {
@@ -359,8 +414,8 @@ export const useBattle = (options: UseBattleOptions = {}) => {
       }),
     }));
 
-    return { phase: state.phase, battleRecordId };
-  }, [battleState, gameStore]);
+    return { phase: state.phase, battleRecordId, itemsGained };
+  }, [battleState, gameStore, usedLuckyCharmInBattle]);
 
   const resetBattle = useCallback(() => {
     if (roundTimer.current) {
@@ -368,6 +423,8 @@ export const useBattle = (options: UseBattleOptions = {}) => {
       roundTimer.current = null;
     }
     isProcessing.current = false;
+
+    setUsedLuckyCharmInBattle(false);
 
     setBattleState({
       playerTeam: [],
@@ -415,6 +472,8 @@ export const useBattle = (options: UseBattleOptions = {}) => {
     autoBattle,
     finalizeBattle,
     resetBattle,
+    confirmUseLuckyCharm,
+    usedLuckyCharmInBattle,
     canUseSynergy: battleState.synergyEnergy >= battleState.maxSynergyEnergy && battleState.phase === 'fighting',
     isFighting: battleState.phase === 'fighting',
     isPlayerWin: battleState.phase === 'playerWin',
