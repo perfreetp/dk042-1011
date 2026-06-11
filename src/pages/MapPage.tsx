@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react';
 import { useGameStore } from '../store/useGameStore';
 import { ISLANDS } from '../data/islands';
 import { MONSTER_TEMPLATES } from '../data/monsters';
+import { cn } from '@/lib/utils';
 import {
   RESOURCE_NAMES,
   RESOURCE_EMOJIS,
@@ -17,11 +18,15 @@ export default function MapPage() {
     team,
     pets,
     resources,
+    inventory,
     startExpedition,
     checkAndUnlockIslands,
   } = useGameStore();
 
   const [selectedIsland, setSelectedIsland] = useState<Island | null>(null);
+  const [useLuckyCharm, setUseLuckyCharm] = useState(false);
+
+  const luckyCharmCount = inventory['lucky-charm'] || 0;
 
   const unlockMap = useMemo(() => {
     const map: Record<string, boolean> = {};
@@ -52,9 +57,10 @@ export default function MapPage() {
   };
 
   const handleStartExpedition = (island: Island) => {
-    const success = startExpedition(island.id);
+    const success = startExpedition(island.id, useLuckyCharm);
     if (success) {
       setSelectedIsland(null);
+      setUseLuckyCharm(false);
     }
   };
 
@@ -457,6 +463,37 @@ export default function MapPage() {
                     {getExpeditionCost(selectedIsland.level)} 金币
                   </span>
                 </div>
+              </div>
+            )}
+
+            {selectedIsland.id !== 'island-home' && (
+              <div className="bg-gradient-to-r from-emerald-500/20 to-teal-500/20 rounded-xl p-4 border border-emerald-400/30 mb-5">
+                <label className={cn(
+                  'flex items-center gap-3 cursor-pointer',
+                  luckyCharmCount === 0 && 'cursor-not-allowed opacity-60'
+                )}>
+                  <input
+                    type="checkbox"
+                    checked={useLuckyCharm}
+                    onChange={(e) => setUseLuckyCharm(e.target.checked)}
+                    disabled={luckyCharmCount === 0}
+                    className="w-5 h-5 rounded border-emerald-400 text-emerald-500 focus:ring-emerald-400 bg-black/30"
+                  />
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-lg">🍀</span>
+                      <span className="font-game text-white/90 text-sm font-bold">使用幸运符</span>
+                      <span className="font-game text-white/50 text-xs">
+                        (背包: {luckyCharmCount})
+                      </span>
+                    </div>
+                    {luckyCharmCount === 0 ? (
+                      <p className="text-white/40 text-xs mt-1 ml-7">背包无幸运符</p>
+                    ) : useLuckyCharm ? (
+                      <p className="text-emerald-300/80 text-xs mt-1 ml-7">将消耗1个幸运符🍀，大幅提升发现概率</p>
+                    ) : null}
+                  </div>
+                </label>
               </div>
             )}
 

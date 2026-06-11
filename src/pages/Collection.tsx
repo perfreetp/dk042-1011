@@ -1,4 +1,5 @@
-import { useState, useMemo, useRef, useEffect } from 'react';
+import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useGameStore } from '../store/useGameStore';
 import { ISLANDS, getIslandById } from '../data/islands';
 import { SYNERGY_SKILLS } from '../data/pets';
@@ -9,15 +10,18 @@ import {
   PET_TYPE_NAMES,
   PET_TYPE_COLORS,
   PET_TYPE_EMOJIS,
+  RESOURCE_NAMES,
+  RESOURCE_EMOJIS,
   getProgressColor,
 } from '../utils/formatters';
-import type { PetType, Rarity, DiscoveryCategory, Discovery, LogEntry } from '../types';
+import type { PetType, Rarity, DiscoveryCategory, Discovery, LogEntry, AdventureRecord } from '../types';
 
-type TabType = 'bonds' | 'progress' | 'discoveries' | 'logs';
+type TabType = 'bonds' | 'progress' | 'discoveries' | 'adventures' | 'logs';
 type DiscoveryViewMode = 'all' | 'found';
 type RarityFilter = 'all' | Rarity;
 type CategoryFilter = 'all' | DiscoveryCategory;
 type LogTypeFilter = 'all' | LogEntry['type'];
+type AdventureFilter = 'all' | 'expedition' | 'battle';
 
 const CATEGORY_NAMES: Record<DiscoveryCategory, string> = {
   treasure: '宝藏',
@@ -56,9 +60,23 @@ const RARITY_BG_GRADIENT: Record<Rarity, string> = {
   legendary: 'from-yellow-50 to-orange-100',
 };
 
+const DIFFICULTY_NAMES: Record<string, string> = {
+  easy: '简单',
+  normal: '普通',
+  hard: '困难',
+};
+
+const DIFFICULTY_COLORS: Record<string, string> = {
+  easy: 'text-green-600 bg-green-100 border-green-300',
+  normal: 'text-yellow-600 bg-yellow-100 border-yellow-300',
+  hard: 'text-red-600 bg-red-100 border-red-300',
+};
+
 export default function Collection() {
-  const { pets, islandProgress, logs, discoveries, checkAndUnlockIslands, getDiscoverySource } = useGameStore();
-  const [activeTab, setActiveTab] = useState<TabType>('bonds');
+  const { pets, islandProgress, logs, discoveries, adventureRecords, checkAndUnlockIslands, getDiscoverySource, getAdventureRecordById } = useGameStore();
+  const [searchParams] = useSearchParams();
+  const initialTab = (searchParams.get('tab') as TabType) || 'bonds';
+  const [activeTab, setActiveTab] = useState<TabType>(initialTab);
   const [discoveryViewMode, setDiscoveryViewMode] = useState<DiscoveryViewMode>('all');
   const [rarityFilter, setRarityFilter] = useState<RarityFilter>('all');
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>('all');
@@ -66,7 +84,11 @@ export default function Collection() {
   const [logTypeFilter, setLogTypeFilter] = useState<LogTypeFilter>('all');
   const [logSearchQuery, setLogSearchQuery] = useState('');
   const [highlightedLogId, setHighlightedLogId] = useState<string | null>(null);
+  const [adventureFilter, setAdventureFilter] = useState<AdventureFilter>('all');
+  const [highlightedRecordId, setHighlightedRecordId] = useState<string | null>(null);
+  const [expandedRecordId, setExpandedRecordId] = useState<string | null>(null);
   const logContainerRef = useRef<HTMLDivElement>(null);
+  const adventureContainerRef = useRef<HTMLDivElement>(null);
 
   const ownedPetTypes = useMemo(() => {
     const types = new Set<PetType>();
@@ -150,6 +172,24 @@ export default function Collection() {
     return result;
   }, [logs, logTypeFilter, logSearchQuery]);
 
+  const adventureStats = useMemo(() => {
+    const total = adventureRecords.length;
+    const expeditions = adventureRecords.filter((r) => r.type === 'expedition').length;
+    const battles = adventureRecords.filter((r) => r.type === 'battle').length;
+    const totalDiscoveries = adventureRecords.reduce((acc, r) => acc + r.discoveries.length, 0);
+    return { total, expeditions, battles, totalDiscoveries };
+  }, [adventureRecords]);
+
+  const filteredAdventures = useMemo(() => {
+    let result = [...adventureRecords].sort((a, b) => b.endTime - a.endTime);
+
+    if (adventureFilter !== 'all') {
+      result = result.filter((r) => r.type === adventureFilter);
+    }
+
+    return result;
+  }, [adventureRecords, adventureFilter]);
+
   const formatTimestamp = (ts: number) => {
     const date = new Date(ts);
     const month = (date.getMonth() + 1).toString().padStart(2, '0');
@@ -210,7 +250,8 @@ export default function Collection() {
     { key: 'bonds', label: '宠物羁绊', icon: '🤝' },
     { key: 'progress', label: '岛屿探索', icon: '🏝️' },
     { key: 'discoveries', label: '稀有发现', icon: '✨' },
-    { key: 'logs', label: '远征日志', icon: '📜' },
+    { key: 'adventures', label: '冒险记录', icon: '📖' },
+    { key: 'logs', label: '活动日志', icon: '📜' },
   ];
 
   const getRarityBadgeClass = (rarity: Rarity) => {
@@ -226,6 +267,22 @@ export default function Collection() {
   const getDiscoverySourceText = (discovery: Discovery | Omit<Discovery, 'foundAt'>) => {
     return getDiscoverySource(discovery.id);
   };
+
+  const getAdventureSourceText = useCallback((discovery: Discovery) => {
+    if (discovery.adventureRecordId) {
+      const record = getAdventureRecordById(discovery.adventureRecordId);
+      if (record) {
+        if (record.type === 'expedition' && record.islandName) {
+          return `来自 🏝️${record.islandName}远征`;
+        }
+        if (record.type === 'battle') {
+          const diffLabel = record.difficulty ? DIFFICULTY_NAMES[record.difficulty] : '';
+          return `来自 ⚔️${diffLabel}战斗`;
+        }
+      }
+    }
+    return '来源不明';
+  }, [getAdventureRecordById]);
 
   const handleViewRelatedLog = (discoveryId: string) => {
     const relatedLog = logs.find((log) => log.relatedDiscoveryId === discoveryId);
@@ -244,6 +301,42 @@ export default function Collection() {
     setSelectedDiscovery(null);
   };
 
+  const handleViewAdventureFromDiscovery = (discovery: Discovery) => {
+    if (discovery.adventureRecordId) {
+      setActiveTab('adventures');
+      setAdventureFilter('all');
+      setHighlightedRecordId(discovery.adventureRecordId);
+      setExpandedRecordId(discovery.adventureRecordId);
+      setTimeout(() => {
+        const el = document.getElementById(`adventure-${discovery.adventureRecordId}`);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 150);
+    }
+    setSelectedDiscovery(null);
+  };
+
+  const handleViewAdventureFromLog = (recordId: string) => {
+    setActiveTab('adventures');
+    setAdventureFilter('all');
+    setHighlightedRecordId(recordId);
+    setExpandedRecordId(recordId);
+    setTimeout(() => {
+      const el = document.getElementById(`adventure-${recordId}`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }, 150);
+  };
+
+  const handleViewDiscoveryFromAdventure = (discoveryId: string) => {
+    setActiveTab('discoveries');
+    setDiscoveryViewMode('found');
+    setRarityFilter('all');
+    setCategoryFilter('all');
+  };
+
   useEffect(() => {
     if (highlightedLogId) {
       const timer = setTimeout(() => setHighlightedLogId(null), 3000);
@@ -251,8 +344,167 @@ export default function Collection() {
     }
   }, [highlightedLogId]);
 
+  useEffect(() => {
+    if (highlightedRecordId) {
+      const timer = setTimeout(() => setHighlightedRecordId(null), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [highlightedRecordId]);
+
   const getFoundDiscovery = (templateId: string): Discovery | undefined => {
     return discoveries.find((d) => d.id === templateId);
+  };
+
+  const renderAdventureCard = (record: AdventureRecord) => {
+    const isExpedition = record.type === 'expedition';
+    const isHighlighted = highlightedRecordId === record.id;
+    const isExpanded = expandedRecordId === record.id;
+
+    const topBorderColor = isExpedition ? 'border-t-blue-500' : 'border-t-red-500';
+    const typeIcon = isExpedition ? '🚢' : '⚔️';
+    const typeLabel = isExpedition ? '远征' : '战斗';
+    const typeBg = isExpedition ? 'bg-blue-500/10 border-blue-500/30' : 'bg-red-500/10 border-red-500/30';
+    const typeText = isExpedition ? 'text-blue-700' : 'text-red-700';
+
+    const titleText = isExpedition && record.islandName
+      ? `${record.islandName}(远征)`
+      : `${record.difficulty ? DIFFICULTY_NAMES[record.difficulty] : ''}战斗(遭遇战)`;
+
+    return (
+      <div
+        key={record.id}
+        id={`adventure-${record.id}`}
+        className={`rounded-2xl border-2 border-t-4 ${topBorderColor} bg-white/60 transition-all duration-500
+          ${isHighlighted ? 'ring-4 ring-yellow-400/60 animate-borderFlash' : ''}
+          ${isExpanded ? '' : ''}
+        `}
+        style={{ animationDelay: '0s' }}
+      >
+        <div
+          className="p-4 md:p-5 cursor-pointer hover:bg-amber-50/40 transition-colors"
+          onClick={() => setExpandedRecordId(isExpanded ? null : record.id)}
+        >
+          <div className="flex items-start gap-3 mb-3">
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-xl shrink-0 border ${typeBg}`}>
+              {typeIcon}
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h4 className={`font-title text-lg ${typeText}`}>{titleText}</h4>
+                <span className={`px-2 py-0.5 rounded-full text-xs font-game border ${typeBg} ${typeText}`}>
+                  {typeLabel}
+                </span>
+                {record.usedLuckyCharm && (
+                  <span className="text-xs font-game">🍀</span>
+                )}
+              </div>
+              <p className="text-xs font-game text-amber-700/50 mt-1">
+                🕐 {formatFullDate(record.endTime)}
+              </p>
+            </div>
+            <div className="text-amber-400 text-sm shrink-0">
+              {isExpanded ? '▲' : '▼'}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1 flex-wrap mb-2">
+            <span className="text-xs font-game text-amber-700/60 mr-1">队伍:</span>
+            {record.teamPetSnapshots.slice(0, 3).map((pet) => (
+              <span key={pet.id} className="inline-flex items-center gap-0.5 text-xs font-game text-amber-800">
+                {pet.emoji} {pet.name} Lv.{pet.level}
+              </span>
+            ))}
+            {record.teamPetSnapshots.length > 3 && (
+              <span className="text-xs font-game text-amber-600">+{record.teamPetSnapshots.length - 3}</span>
+            )}
+          </div>
+
+          {!isExpanded && (
+            <p className="text-xs font-game text-amber-700/60 line-clamp-2">
+              {record.summary}
+            </p>
+          )}
+        </div>
+
+        {isExpanded && (
+          <div className="px-4 md:px-5 pb-4 md:pb-5 space-y-3 animate-fadeIn border-t border-amber-200/50 pt-3">
+            {isExpedition && record.collectedResources.length > 0 && (
+              <div>
+                <p className="text-xs font-game text-amber-700/60 mb-1">📦 采集资源:</p>
+                <div className="flex items-center gap-2 flex-wrap">
+                  {record.collectedResources.map((res, idx) => (
+                    <span key={idx} className="inline-flex items-center gap-1 text-xs font-game text-amber-800 bg-amber-100/80 px-2 py-0.5 rounded-full border border-amber-200">
+                      {RESOURCE_EMOJIS[res.type]} {res.amount}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {record.encounteredMonsters.length > 0 && (
+              <div>
+                <p className="text-xs font-game text-amber-700/60 mb-1">👹 遭遇怪物:</p>
+                <div className="flex items-center gap-2 flex-wrap">
+                  {record.encounteredMonsters.map((m, idx) => (
+                    <span key={idx} className="inline-flex items-center gap-1 text-xs font-game text-amber-800 bg-amber-100/80 px-2 py-0.5 rounded-full border border-amber-200">
+                      {m.emoji} {m.name} {m.defeated ? '✅' : '❌'}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {record.discoveries.length > 0 && (
+              <div>
+                <p className="text-xs font-game text-amber-700/60 mb-1">✨ 新发现:</p>
+                <div className="flex items-center gap-2 flex-wrap">
+                  {record.discoveries.map((dId) => {
+                    const disc = getDiscoveryById(dId);
+                    if (!disc) return null;
+                    return (
+                      <button
+                        key={dId}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleViewDiscoveryFromAdventure(dId);
+                        }}
+                        className="inline-flex items-center gap-1 text-xs font-game text-purple-700 bg-purple-100/80 px-2 py-0.5 rounded-full border border-purple-200 hover:bg-purple-200 transition-colors"
+                      >
+                        {disc.emoji} {disc.name}
+                        <span className={`px-1 rounded text-[10px] ${RARITY_COLORS[disc.rarity]}`}>
+                          {RARITY_NAMES[disc.rarity]}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {record.usedLuckyCharm && (
+              <div className="flex items-center gap-1">
+                <span className="text-sm">🍀</span>
+                <span className="text-xs font-game text-green-700 bg-green-100 px-2 py-0.5 rounded-full border border-green-200">
+                  使用了幸运符
+                </span>
+              </div>
+            )}
+
+            <div className="flex items-center gap-3">
+              <span className="text-xs font-game text-amber-700/80 bg-amber-100/80 px-2 py-0.5 rounded-full border border-amber-200">
+                ⭐ 共获得 {record.expGained} 经验
+              </span>
+            </div>
+
+            <div className="bg-amber-50/80 rounded-xl p-3 border border-amber-200/50">
+              <p className="font-game text-amber-800 text-sm leading-relaxed">
+                {record.summary}
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+    );
   };
 
   return (
@@ -276,15 +528,15 @@ export default function Collection() {
                 <button
                   key={tab.key}
                   onClick={() => setActiveTab(tab.key)}
-                  className={`flex-1 flex items-center justify-center gap-2 px-3 py-4 md:py-5 
-                    font-game text-sm md:text-base transition-all duration-300
+                  className={`flex-1 flex items-center justify-center gap-1 px-1 py-3 md:py-4
+                    font-game text-xs md:text-sm transition-all duration-300
                     ${activeTab === tab.key
                       ? 'text-amber-900 bg-amber-400/40'
                       : 'text-amber-800/70 hover:text-amber-900 hover:bg-amber-400/20'
                     }
                   `}
                 >
-                  <span className="text-lg md:text-xl">{tab.icon}</span>
+                  <span className="text-base md:text-lg">{tab.icon}</span>
                   <span className="hidden sm:inline">{tab.label}</span>
                 </button>
               ))}
@@ -292,7 +544,7 @@ export default function Collection() {
             {tabs.map((tab, idx) => (
               <div
                 key={`indicator-${tab.key}`}
-                className={`absolute bottom-0 h-1 bg-gradient-to-r from-amber-600 to-orange-600 
+                className={`absolute bottom-0 h-1 bg-gradient-to-r from-amber-600 to-orange-600
                   transition-all duration-300 rounded-t-md
                   ${activeTab === tab.key ? 'opacity-100' : 'opacity-0'}
                 `}
@@ -757,11 +1009,79 @@ export default function Collection() {
               </div>
             )}
 
+            {activeTab === 'adventures' && (
+              <div className="space-y-6 animate-fadeIn">
+                <div className="bg-gradient-to-r from-indigo-100 to-blue-100 rounded-2xl p-5 md:p-6 border-2 border-indigo-300 shadow-lg shadow-indigo-500/10">
+                  <h3 className="font-title text-2xl text-indigo-900 mb-4">
+                    📖 冒险记录
+                  </h3>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div className="bg-white/60 rounded-xl p-3 border border-indigo-200 text-center">
+                      <div className="font-title text-2xl text-indigo-600 font-bold">{adventureStats.total}</div>
+                      <p className="text-xs font-game text-indigo-700/60">总冒险次数</p>
+                    </div>
+                    <div className="bg-white/60 rounded-xl p-3 border border-indigo-200 text-center">
+                      <div className="font-title text-2xl text-blue-600 font-bold">{adventureStats.expeditions}</div>
+                      <p className="text-xs font-game text-indigo-700/60">远征次数</p>
+                    </div>
+                    <div className="bg-white/60 rounded-xl p-3 border border-indigo-200 text-center">
+                      <div className="font-title text-2xl text-red-600 font-bold">{adventureStats.battles}</div>
+                      <p className="text-xs font-game text-indigo-700/60">战斗次数</p>
+                    </div>
+                    <div className="bg-white/60 rounded-xl p-3 border border-indigo-200 text-center">
+                      <div className="font-title text-2xl text-purple-600 font-bold">{adventureStats.totalDiscoveries}</div>
+                      <p className="text-xs font-game text-indigo-700/60">总发现数</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex gap-2">
+                  {(['all', 'expedition', 'battle'] as AdventureFilter[]).map((filter) => {
+                    const labels: Record<AdventureFilter, string> = {
+                      all: '📋 全部',
+                      expedition: '🚢 远征',
+                      battle: '⚔️ 战斗',
+                    };
+                    return (
+                      <button
+                        key={filter}
+                        onClick={() => setAdventureFilter(filter)}
+                        className={`px-4 py-2 rounded-xl font-game text-sm transition-all
+                          ${adventureFilter === filter
+                            ? 'bg-indigo-500 text-white shadow-md'
+                            : 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200'
+                          }
+                        `}
+                      >
+                        {labels[filter]}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {filteredAdventures.length > 0 ? (
+                  <div ref={adventureContainerRef} className="space-y-4">
+                    {filteredAdventures.map((record) => renderAdventureCard(record))}
+                  </div>
+                ) : (
+                  <div className="text-center py-16 bg-amber-50/50 rounded-xl border border-amber-200/50">
+                    <div className="text-6xl mb-4 opacity-50">📖</div>
+                    <p className="font-game text-amber-800/60 text-lg">
+                      还没有任何冒险记录
+                    </p>
+                    <p className="font-game text-amber-800/40 text-sm mt-1">
+                      开始远征或战斗，记录你的冒险故事！
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+
             {activeTab === 'logs' && (
               <div className="animate-fadeIn">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
                   <h3 className="font-title text-2xl text-amber-900 flex items-center gap-2">
-                    📜 远征日志
+                    📜 活动日志
                     <span className="text-sm font-game text-amber-700/70 ml-2">
                       （共 {filteredLogs.length} 条）
                     </span>
@@ -812,14 +1132,14 @@ export default function Collection() {
                             style={{ animationDelay: `${idx * 0.03}s` }}
                           >
                             <div
-                              className={`absolute left-2 md:left-4 top-3 w-5 h-5 rounded-full ${style.dot} 
+                              className={`absolute left-2 md:left-4 top-3 w-5 h-5 rounded-full ${style.dot}
                                 ring-4 ${style.ring} shadow-md
                                 ${isHighlighted ? 'ring-8 animate-pulse' : ''}
                               `}
                             ></div>
 
                             <div
-                              className={`rounded-xl p-4 border-2 ${style.bg} ${style.border} 
+                              className={`rounded-xl p-4 border-2 ${style.bg} ${style.border}
                                 transition-all hover:scale-[1.01]
                                 ${isHighlighted ? 'ring-4 ring-yellow-400/50 scale-102' : ''}
                               `}
@@ -841,6 +1161,14 @@ export default function Collection() {
                                       <span className="inline-flex items-center gap-1 text-xs font-game text-purple-700 bg-purple-100 px-2 py-0.5 rounded-full border border-purple-300">
                                         ✨ 伴随新发现
                                       </span>
+                                    )}
+                                    {log.relatedAdventureRecordId && (
+                                      <button
+                                        onClick={() => handleViewAdventureFromLog(log.relatedAdventureRecordId!)}
+                                        className="inline-flex items-center gap-1 text-xs font-game text-indigo-700 bg-indigo-100 px-2 py-0.5 rounded-full border border-indigo-300 hover:bg-indigo-200 transition-colors"
+                                      >
+                                        📖 查看冒险记录
+                                      </button>
                                     )}
                                   </div>
                                 </div>
@@ -903,7 +1231,7 @@ export default function Collection() {
                 </p>
               </div>
 
-              <div className="grid grid-cols-2 gap-3 mb-6">
+              <div className="grid grid-cols-2 gap-3 mb-4">
                 <div className="bg-amber-100/80 rounded-xl p-3 border border-amber-300">
                   <p className="text-xs font-game text-amber-600 mb-1">发现时间</p>
                   <p className="font-game text-amber-900 text-sm">
@@ -913,10 +1241,21 @@ export default function Collection() {
                 <div className="bg-amber-100/80 rounded-xl p-3 border border-amber-300">
                   <p className="text-xs font-game text-amber-600 mb-1">来源</p>
                   <p className="font-game text-amber-900 text-sm">
-                    {getDiscoverySourceText(selectedDiscovery)}
+                    {getAdventureSourceText(selectedDiscovery)}
                   </p>
                 </div>
               </div>
+
+              {selectedDiscovery.adventureRecordId && (
+                <div className="mb-4">
+                  <button
+                    onClick={() => handleViewAdventureFromDiscovery(selectedDiscovery)}
+                    className="w-full px-4 py-3 bg-gradient-to-r from-indigo-500 to-blue-500 text-white rounded-xl font-game shadow-lg hover:shadow-xl transition-all hover:-translate-y-0.5"
+                  >
+                    🔗 查看来源冒险
+                  </button>
+                </div>
+              )}
 
               <div className="flex gap-3">
                 <button
@@ -970,6 +1309,19 @@ export default function Collection() {
         }
         .scale-102 {
           transform: scale(1.02);
+        }
+        @keyframes borderFlash {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(250, 204, 21, 0); }
+          50% { box-shadow: 0 0 12px 4px rgba(250, 204, 21, 0.5); }
+        }
+        .animate-borderFlash {
+          animation: borderFlash 1s ease-in-out 3;
+        }
+        .line-clamp-2 {
+          display: -webkit-box;
+          -webkit-line-clamp: 2;
+          -webkit-box-orient: vertical;
+          overflow: hidden;
         }
       `}</style>
     </div>

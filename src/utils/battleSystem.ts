@@ -383,7 +383,8 @@ const getDiscoveryDropRate = (monsterRarity: Rarity, difficulty: 'easy' | 'norma
 export const rollBattleDiscovery = (
   monsters: Monster[],
   luck: number = 0,
-  difficulty: 'easy' | 'normal' | 'hard' = 'normal'
+  difficulty: 'easy' | 'normal' | 'hard' = 'normal',
+  hasLuckyCharm?: boolean
 ): string[] => {
   const discoveries: string[] = [];
   const monsterOrTreasureDiscoveries = DISCOVERY_TEMPLATES.filter(
@@ -398,6 +399,10 @@ export const rollBattleDiscovery = (
     const monsterRarity = getMonsterRarity(monster);
     let dropRate = getDiscoveryDropRate(monsterRarity, difficulty);
     dropRate = Math.min(1, dropRate * (1 + luck * 0.01));
+
+    if (hasLuckyCharm) {
+      dropRate = Math.min(1, dropRate * 3);
+    }
 
     if (Math.random() < dropRate) {
       const eligibleDiscoveries = monsterOrTreasureDiscoveries.filter(
@@ -437,7 +442,8 @@ export const calculateBattleRewards = (
   monsters: Monster[],
   victory: boolean,
   luck: number = 0,
-  difficulty: 'easy' | 'normal' | 'hard' = 'normal'
+  difficulty: 'easy' | 'normal' | 'hard' = 'normal',
+  hasLuckyCharm?: boolean
 ): BattleRewards => {
   if (!victory) {
     return { exp: 0, resources: [], discoveries: [] };
@@ -462,7 +468,7 @@ export const calculateBattleRewards = (
     amount,
   }));
 
-  const discoveries = rollBattleDiscovery(monsters, luck, difficulty);
+  const discoveries = rollBattleDiscovery(monsters, luck, difficulty, hasLuckyCharm);
 
   return { exp: Math.floor(totalExp), resources, discoveries };
 };

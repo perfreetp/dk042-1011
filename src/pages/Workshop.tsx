@@ -76,19 +76,181 @@ const COLLECT_POINTS: CollectPoint[] = [
   },
 ];
 
+const TOOL_SLOT_NAMES: Record<'ore' | 'herb' | 'shell', string> = {
+  ore: '矿洞',
+  herb: '药园',
+  shell: '海滩',
+};
+
+const TOOL_SLOT_EMOJIS: Record<'ore' | 'herb' | 'shell', string> = {
+  ore: '⛏️',
+  herb: '🌿',
+  shell: '🐚',
+};
+
+const TOOL_SLOT_MAP: Record<string, 'ore' | 'herb' | 'shell'> = {
+  'miner-pickaxe': 'ore',
+  'harvest-sickle': 'herb',
+  'shell-net': 'shell',
+};
+
 interface CollectAnim {
   type: string;
   amount: number;
   key: number;
+  breakdown?: {
+    base: number;
+    workshop: number;
+    tool: number;
+    toolName?: string;
+  };
 }
 
 const COLLECT_COOLDOWN = 3000;
+
+function ToolEquipmentBar() {
+  const equippedTools = useGameStore((s) => s.equippedTools);
+  const inventory = useGameStore((s) => s.inventory);
+  const equipTool = useGameStore((s) => s.equipTool);
+  const unequipTool = useGameStore((s) => s.unequipTool);
+  const [openSlot, setOpenSlot] = useState<'ore' | 'herb' | 'shell' | null>(null);
+
+  const slots: ('ore' | 'herb' | 'shell')[] = ['ore', 'herb', 'shell'];
+
+  const getAvailableToolsForSlot = (slot: 'ore' | 'herb' | 'shell') => {
+    return ITEMS.filter((item) => {
+      if (item.type !== 'tool') return false;
+      if (TOOL_SLOT_MAP[item.id] !== slot) return false;
+      return (inventory[item.id] || 0) > 0;
+    });
+  };
+
+  return (
+    <div className="rounded-2xl p-5 md:p-6 card-shadow" style={{
+      background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.15) 0%, rgba(167, 139, 250, 0.1) 50%, rgba(124, 58, 237, 0.15) 100%)',
+      backdropFilter: 'blur(12px)',
+      border: '1px solid rgba(139, 92, 246, 0.3)',
+    }}>
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+        <h3 className="font-title text-2xl text-white flex items-center gap-2">
+          <span className="text-3xl">🔧</span> 工具装备栏
+        </h3>
+        <span className="text-xs font-game text-white/70 bg-purple-900/30 px-3 py-1.5 rounded-lg border border-purple-600/30">
+          装备工具提升采集效率
+        </span>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {slots.map((slot) => {
+          const equippedItemId = equippedTools[slot];
+          const equippedItem = equippedItemId ? getItemById(equippedItemId) : null;
+          const isOpen = openSlot === slot;
+          const availableTools = getAvailableToolsForSlot(slot);
+
+          return (
+            <div key={slot} className="relative">
+              <div
+                className={`rounded-xl p-4 border-2 transition-all duration-200 ${
+                  equippedItem
+                    ? 'bg-purple-500/15 border-purple-400/40'
+                    : 'bg-white/5 border-white/15'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">{TOOL_SLOT_EMOJIS[slot]}</span>
+                    <span className="font-title text-white">{TOOL_SLOT_NAMES[slot]}</span>
+                  </div>
+                </div>
+
+                {equippedItem ? (
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="text-xl">{equippedItem.emoji}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-game text-white text-sm truncate">{equippedItem.name}</div>
+                      <div className="text-xs text-purple-300 font-game">
+                        采集 +{equippedItem.effect?.value || 0}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => unequipTool(slot)}
+                      className="px-2 py-1 rounded-lg bg-white/10 border border-white/20 text-white/70 hover:bg-white/20 hover:text-white text-xs font-game transition-all"
+                    >
+                      卸下
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="text-sm text-white/40 font-game">空槽位</div>
+                    <button
+                      onClick={() => setOpenSlot(isOpen ? null : slot)}
+                      className="px-2 py-1 rounded-lg bg-purple-500/20 border border-purple-400/30 text-purple-300 hover:bg-purple-500/30 text-xs font-game transition-all"
+                    >
+                      装备
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {isOpen && (
+                <div className="absolute top-full left-0 right-0 mt-1 z-20">
+                  <div className="bg-gray-900/95 backdrop-blur-sm border border-purple-400/40 rounded-xl p-3 card-shadow">
+                    <div className="text-xs text-white/60 font-game mb-2">选择工具装备</div>
+                    {availableTools.length > 0 ? (
+                      <div className="space-y-1.5">
+                        {availableTools.map((tool) => (
+                          <button
+                            key={tool.id}
+                            onClick={() => {
+                              equipTool(slot, tool.id);
+                              setOpenSlot(null);
+                            }}
+                            className="w-full flex items-center gap-2 p-2 rounded-lg bg-white/10 hover:bg-white/20 border border-white/10 hover:border-purple-400/40 transition-all text-left"
+                          >
+                            <span className="text-lg">{tool.emoji}</span>
+                            <div className="flex-1 min-w-0">
+                              <div className="font-game text-white text-sm truncate">{tool.name}</div>
+                              <div className="text-[10px] text-purple-300 font-game">
+                                采集 +{tool.effect?.value || 0} · 数量: {inventory[tool.id] || 0}
+                              </div>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-center py-3">
+                        <div className="text-sm text-white/40 font-game">背包中没有可用工具</div>
+                        <div className="text-[10px] text-white/30 font-game mt-1">去道具制作台制作吧</div>
+                      </div>
+                    )}
+                    <button
+                      onClick={() => setOpenSlot(null)}
+                      className="w-full mt-2 py-1.5 rounded-lg bg-white/5 text-white/50 text-xs font-game hover:bg-white/10 transition-all"
+                    >
+                      取消
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {openSlot && (
+        <div className="fixed inset-0 z-10" onClick={() => setOpenSlot(null)} />
+      )}
+    </div>
+  );
+}
 
 function ResourceGathering() {
   const resources = useGameStore((s) => s.resources);
   const facilities = useGameStore((s) => s.facilities);
   const collectResource = useGameStore((s) => s.collectResource);
   const getWarehouseCapacity = useGameStore((s) => s.getWarehouseCapacity);
+  const getGatheringBonus = useGameStore((s) => s.getGatheringBonus);
+  const equippedTools = useGameStore((s) => s.equippedTools);
   const [collectAnim, setCollectAnim] = useState<CollectAnim | null>(null);
   const [cooldowns, setCooldowns] = useState<Record<string, number>>({});
   const capacity = getWarehouseCapacity();
@@ -116,11 +278,27 @@ function ResourceGathering() {
 
     setCooldowns((prev) => ({ ...prev, [point.type]: now + COLLECT_COOLDOWN }));
 
+    const workshopBonus = Math.floor(facilities.workshop * 0.5);
+    const toolBonus = getGatheringBonus(point.type);
+    const equippedItemId = equippedTools[point.type];
+    const equippedItem = equippedItemId ? getItemById(equippedItemId) : null;
+
     setTimeout(() => {
       const amount = collectResource(point.type);
-      setCollectAnim({ type: point.type, amount, key: Date.now() });
+      const base = amount - workshopBonus - toolBonus;
+      setCollectAnim({
+        type: point.type,
+        amount,
+        key: Date.now(),
+        breakdown: {
+          base,
+          workshop: workshopBonus,
+          tool: toolBonus,
+          toolName: equippedItem?.name,
+        },
+      });
 
-      setTimeout(() => setCollectAnim(null), 1500);
+      setTimeout(() => setCollectAnim(null), 2500);
     }, 400);
   };
 
@@ -161,6 +339,8 @@ function ResourceGathering() {
           const cooldownPercent = getCooldownPercent(point.type);
           const showAnim = collectAnim?.type === point.type;
           const isFull = current >= capacity;
+          const equippedItemId = equippedTools[point.type];
+          const equippedItem = equippedItemId ? getItemById(equippedItemId) : null;
 
           return (
             <div
@@ -171,10 +351,17 @@ function ResourceGathering() {
                 <div
                   key={collectAnim!.key}
                   className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-10 pointer-events-none"
-                  style={{ animation: 'floatUp 1.5s ease-out forwards' }}
+                  style={{ animation: 'floatUp 2.5s ease-out forwards' }}
                 >
-                  <div className="font-title text-3xl text-white drop-shadow-lg">
+                  <div className="font-title text-3xl text-white drop-shadow-lg text-center">
                     +{collectAnim!.amount} {point.emoji}
+                    {collectAnim!.breakdown && (
+                      <div className="text-sm font-game mt-1 text-white/80">
+                        （基础{collectAnim!.breakdown.base}
+                        {collectAnim!.breakdown.workshop > 0 && ` + 工坊${collectAnim!.breakdown.workshop}`}
+                        {collectAnim!.breakdown.tool > 0 && ` + ${collectAnim!.breakdown.toolName || '工具'}${collectAnim!.breakdown.tool}`}）
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -195,7 +382,7 @@ function ResourceGathering() {
               )}
 
               <div className="relative z-0">
-                <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center justify-between mb-2">
                   <div className="text-5xl drop-shadow-lg">{point.emoji}</div>
                   <div className="text-right">
                     <h4 className="font-title text-xl text-white">{point.name}</h4>
@@ -203,6 +390,16 @@ function ResourceGathering() {
                       {RESOURCE_NAMES[point.type]}
                     </p>
                   </div>
+                </div>
+
+                <div className={`text-xs font-game px-2 py-1 rounded-lg mb-3 ${
+                  equippedItem
+                    ? 'bg-purple-500/20 text-purple-300 border border-purple-400/30'
+                    : 'bg-white/5 text-white/40 border border-white/10'
+                }`}>
+                  {equippedItem
+                    ? `装备：${equippedItem.emoji} ${equippedItem.name} +${equippedItem.effect?.value || 0}`
+                    : '未装备'}
                 </div>
 
                 <div className="mb-4">
@@ -646,6 +843,8 @@ function InventoryBag() {
         {ownedItems.map((item) => {
           const count = inventory[item.id] || 0;
           const isConsumable = item.type === 'consumable';
+          const isTool = item.type === 'tool';
+          const isLuckyCharm = item.id === 'lucky-charm';
 
           return (
             <div
@@ -653,23 +852,44 @@ function InventoryBag() {
               className="relative group"
             >
               <div
-                className={`aspect-square rounded-xl flex flex-col items-center justify-center p-1 cursor-pointer transition-all duration-200 hover:scale-105 ${rarityClass(item.rarity)}`}
+                className={`aspect-square rounded-xl flex flex-col items-center justify-center p-1 cursor-pointer transition-all duration-200 hover:scale-105 ${
+                  isLuckyCharm
+                    ? 'ring-2 ring-purple-400/70'
+                    : ''
+                } ${rarityClass(item.rarity)}`}
                 style={{ background: undefined }}
                 onClick={() => handleItemClick(item)}
               >
                 <div
-                  className="w-full h-full rounded-lg flex items-center justify-center"
+                  className="w-full h-full rounded-lg flex items-center justify-center relative"
                   style={{
-                    background: 'linear-gradient(135deg, rgba(255,255,255,0.15) 0%, rgba(255,255,255,0.05) 100%)',
+                    background: isLuckyCharm
+                      ? 'linear-gradient(135deg, rgba(168, 85, 247, 0.25) 0%, rgba(139, 92, 246, 0.15) 50%, rgba(168, 85, 247, 0.25) 100%)'
+                      : 'linear-gradient(135deg, rgba(255,255,255,0.15) 0%, rgba(255,255,255,0.05) 100%)',
                   }}
                 >
                   <span className="text-2xl md:text-3xl">{item.emoji}</span>
+                  {isLuckyCharm && (
+                    <span className="absolute top-0 right-0 text-[10px]">✨</span>
+                  )}
                 </div>
               </div>
 
               <div className="absolute -bottom-1 -right-1 bg-gradient-to-r from-amber-500 to-orange-500 text-white text-xs font-game px-1.5 py-0.5 rounded-full min-w-[20px] text-center shadow-lg">
                 ×{count}
               </div>
+
+              {isTool && (
+                <div className="absolute -top-1 -left-1 bg-purple-500 text-white text-[8px] font-game px-1 py-0.5 rounded-full shadow-lg leading-none">
+                  可装备
+                </div>
+              )}
+
+              {isLuckyCharm && (
+                <div className="absolute -top-1 -left-1 bg-purple-500 text-white text-[8px] font-game px-1 py-0.5 rounded-full shadow-lg leading-none">
+                  ✨
+                </div>
+              )}
 
               <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity duration-200 z-10">
                 <div className="bg-black/90 backdrop-blur-sm rounded-lg p-2 border border-white/20 text-center whitespace-nowrap">
@@ -682,6 +902,12 @@ function InventoryBag() {
                   </div>
                   {isConsumable && (
                     <div className="text-[10px] text-amber-300 font-game mt-1">点击使用</div>
+                  )}
+                  {isTool && (
+                    <div className="text-[10px] text-purple-300 font-game mt-1">🔧 可装备到工坊</div>
+                  )}
+                  {isLuckyCharm && (
+                    <div className="text-[10px] text-purple-300 font-game mt-1">🍀 出征前在地图页消耗</div>
                   )}
                 </div>
               </div>
@@ -867,6 +1093,7 @@ export default function Workshop() {
         </p>
       </div>
 
+      <ToolEquipmentBar />
       <ResourceGathering />
       <CraftingTable />
       <InventoryBag />

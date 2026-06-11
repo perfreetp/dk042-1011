@@ -148,7 +148,8 @@ export const useBattle = (options: UseBattleOptions = {}) => {
         newPhase = result.winner === 'player' ? 'playerWin' : 'enemyWin';
 
         if (result.winner === 'player') {
-          const rewards = calculateBattleRewards(prev.enemyTeam, true, 0, prev.difficulty);
+          const hasLuckyCharm = (useGameStore.getState().inventory['lucky-charm'] || 0) > 0;
+          const rewards = calculateBattleRewards(prev.enemyTeam, true, 0, prev.difficulty, hasLuckyCharm);
           finalRewards = {
             exp: rewards.exp,
             resources: rewards.resources,
@@ -216,7 +217,8 @@ export const useBattle = (options: UseBattleOptions = {}) => {
 
       if (aliveMonsters.length === 0) {
         newPhase = 'playerWin';
-        const rewards = calculateBattleRewards(prev.enemyTeam, true, 0, prev.difficulty);
+        const hasLuckyCharm = (useGameStore.getState().inventory['lucky-charm'] || 0) > 0;
+        const rewards = calculateBattleRewards(prev.enemyTeam, true, 0, prev.difficulty, hasLuckyCharm);
         finalRewards = {
           exp: rewards.exp,
           resources: rewards.resources,
@@ -284,6 +286,7 @@ export const useBattle = (options: UseBattleOptions = {}) => {
     }
 
     const state = battleState;
+    let battleRecordId: string | undefined;
 
     if (state.phase === 'playerWin') {
       if (state.rewards.resources.length > 0) {
@@ -307,6 +310,28 @@ export const useBattle = (options: UseBattleOptions = {}) => {
         if (pet.hp > 0 && pet.hp < pet.maxHp * 0.5) {
           gameStore.addLog(`${pet.emoji}${pet.name} 受了轻伤`, 'warning');
         }
+      });
+
+      const hasLuckyCharm = (useGameStore.getState().inventory['lucky-charm'] || 0) > 0;
+      battleRecordId = gameStore.createBattleRecord({
+        difficulty: state.difficulty,
+        teamPetIds: state.playerTeam.map((p) => p.id),
+        teamPetSnapshots: state.playerTeam.map((p) => ({
+          id: p.id,
+          name: p.name,
+          emoji: p.emoji,
+          level: p.level,
+        })),
+        monsters: state.enemyTeam.map((m) => ({
+          templateId: m.templateId,
+          name: m.name,
+          emoji: m.emoji,
+          defeated: m.hp <= 0,
+        })),
+        discoveries: state.rewards.discoveries,
+        expGained: state.rewards.exp,
+        resources: state.rewards.resources,
+        usedLuckyCharm: hasLuckyCharm,
       });
     } else if (state.phase === 'enemyWin') {
       gameStore.addLog('战斗失败...队伍需要休息', 'danger');
@@ -334,7 +359,7 @@ export const useBattle = (options: UseBattleOptions = {}) => {
       }),
     }));
 
-    return state.phase;
+    return { phase: state.phase, battleRecordId };
   }, [battleState, gameStore]);
 
   const resetBattle = useCallback(() => {

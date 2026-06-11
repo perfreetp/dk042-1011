@@ -13,6 +13,7 @@ import type {
   LogEntry,
   ResourceReward,
   Equipment,
+  AdventureRecord,
 } from '../types';
 import { STARTER_PETS, PET_TEMPLATES, SKILL_POOL, RARITY_MULTIPLIER } from '../data/pets';
 import { getInitialIslandProgress, ISLANDS, getIslandById } from '../data/islands';
@@ -21,6 +22,7 @@ import { getUpgradeCost, getFacilityBonus, getMaxFacilityLevel } from '../data/f
 import { getRecipeById } from '../data/recipes';
 import { createDiscovery, DISCOVERY_TEMPLATES, getDiscoveryById } from '../data/discoveries';
 import { getItemById, ITEMS } from '../data/items';
+import { MONSTER_TEMPLATES } from '../data/monsters';
 import { randomInt, randomChoice, randomPetName, randomId, weightedRandomChoice, clamp, randomBool } from '../utils/random';
 
 const STORAGE_KEY = 'maple-pet-expedition-save-v1';
@@ -109,6 +111,8 @@ const getInitialState = (): GameState => ({
     'energy-drink': 2,
   },
   lastOrderRefresh: Date.now(),
+  adventureRecords: [],
+  equippedTools: { ore: undefined, herb: undefined, shell: undefined },
 });
 
 const loadFromStorage = (): GameState | null => {
@@ -123,12 +127,24 @@ const loadFromStorage = (): GameState | null => {
           'energy-drink': 2,
         };
       }
+      if (!parsed.adventureRecords) {
+        parsed.adventureRecords = [];
+      }
+      if (!parsed.equippedTools) {
+        parsed.equippedTools = { ore: undefined, herb: undefined, shell: undefined };
+      }
       return parsed as GameState;
     }
   } catch (e) {
     console.error('Failed to load game state:', e);
   }
   return null;
+};
+
+const TOOL_SLOT_MAP: Record<string, 'ore' | 'herb' | 'shell'> = {
+  'miner-pickaxe': 'ore',
+  'harvest-sickle': 'herb',
+  'shell-net': 'shell',
 };
 
 interface GameActions {
@@ -154,7 +170,7 @@ interface GameActions {
   addPetToTeam: (petId: string) => boolean;
   removePetFromTeam: (petId: string) => void;
 
-  startExpedition: (islandId: string) => boolean;
+  startExpedition: (islandId: string, useLuckyCharm?: boolean) => boolean;
   updateExpeditionStatus: (status: Expedition['status']) => void;
   updateExpeditionProgress: () => void;
   completeExpedition: (rewards: ResourceReward[], battleWins: number, discoveries: string[]) => void;
@@ -169,9 +185,9 @@ interface GameActions {
   submitOrder: (orderId: string) => boolean;
   refreshOrderList: () => void;
 
-  addLog: (message: string, type?: LogEntry['type'], relatedDiscoveryId?: string, relatedIslandId?: string) => void;
-  addDiscovery: (discoveryId: string) => boolean;
-  rollDiscoveryForIsland: (islandId: string) => string | null;
+  addLog: (message: string, type?: LogEntry['type'], relatedDiscoveryId?: string, relatedIslandId?: string, relatedAdventureRecordId?: string) => void;
+  addDiscovery: (discoveryId: string, adventureRecordId?: string) => boolean;
+  rollDiscoveryForIsland: (islandId: string, hasLuckyCharm?: boolean) => string | null;
   getDiscoverySource: (discoveryId: string) => string;
 
   useItem: (itemId: string, targetPetId?: string) => boolean;
@@ -181,9 +197,34 @@ interface GameActions {
   checkAndUnlockIslands: () => string[];
   resetGame: () => void;
   saveToStorage: () => void;
+
+  addAdventureRecord: (record: AdventureRecord) => void;
+  getAdventureRecordById: (id: string) => AdventureRecord | undefined;
+  equipTool: (slot: 'ore' | 'herb' | 'shell', itemId: string) => boolean;
+  unequipTool: (slot: 'ore' | 'herb' | 'shell') => void;
+  getGatheringBonus: (type: 'ore' | 'herb' | 'shell') => number;
+  createBattleRecord: (params: {
+    islandId?: string;
+    difficulty: 'easy' | 'normal' | 'hard';
+    teamPetIds: string[];
+    teamPetSnapshots: { id: string; name: string; emoji: string; level: number }[];
+    monsters: { templateId: string; name: string; emoji: string; defeated: boolean }[];
+    discoveries: string[];
+    expGained: number;
+    resources: ResourceReward[];
+    usedLuckyCharm: boolean;
+  }) => string;
 }
 
 export type GameStore = GameState & GameActions;
+
+const RESOURCE_NAMES: Record<string, string> = {
+  gold: '金币',
+  ore: '矿石',
+  herb: '草药',
+  shell: '贝壳',
+  exp: '经验',
+};
 
 export const useGameStore = create<GameStore>((set, get) => ({
   ...getInitialState(),
@@ -504,7 +545,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
     set((s) => ({ team: s.team.filter((id) => id !== petId) }));
   },
 
-  startExpedition: (islandId) => {
+  startExpedition: (islandId, useLuckyCharm) => {
     const state = get();
     if (state.expedition) {
       get().addLog('已有远征进行中！', 'warning');
@@ -532,6 +573,24 @@ export const useGameStore = create<GameStore>((set, get) => ({
       return false;
     }
 
+    let usedLuckyCharm = false;
+    if (useLuckyCharm) {
+      const charmCount = state.inventory['lucky-charm'] || 0;
+      if (charmCount > 0) {
+        get().removeItem('lucky-charm', 1);
+        usedLuckyCharm = true;
+        get().addLog('🍀 使用了幸运符，本次远征发现概率大幅提升！', 'success');
+      } else {
+        get().addLog('背包中没有幸运符！', 'warning');
+      }
+    }
+
+    const lockedTeamPetIds = [...state.team];
+    const lockedTeamSnapshots = state.team
+      .map((petId) => state.pets.find((p) => p.id === petId))
+      .filter((p): p is Pet => !!p)
+      .map((p) => ({ id: p.id, name: p.name, emoji: p.emoji, level: p.level }));
+
     const durationSeconds = 30 + island.level * 15;
 
     const expedition: Expedition = {
@@ -546,6 +605,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
       discoveredItems: [],
       encounteredMonsters: [],
       battleLog: [],
+      lockedTeamPetIds,
+      lockedTeamSnapshots,
+      usedLuckyCharm,
     };
 
     set({ expedition });
@@ -600,7 +662,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       }
 
       const discoveredItems: string[] = [];
-      const discoveryId = get().rollDiscoveryForIsland(island.id);
+      const discoveryId = get().rollDiscoveryForIsland(island.id, state.expedition.usedLuckyCharm);
       if (discoveryId) {
         discoveredItems.push(discoveryId);
       }
@@ -639,13 +701,14 @@ export const useGameStore = create<GameStore>((set, get) => ({
     if (!state.expedition) return;
 
     const islandId = state.expedition.islandId;
+    const lockedTeamPetIds = state.expedition.lockedTeamPetIds;
 
     get().addResources(rewards);
 
     const totalExp = rewards.find((r) => r.type === 'exp')?.amount || 0;
-    if (totalExp > 0) {
-      const expPerPet = Math.floor(totalExp / state.team.length);
-      for (const petId of state.team) {
+    if (totalExp > 0 && lockedTeamPetIds.length > 0) {
+      const expPerPet = Math.floor(totalExp / lockedTeamPetIds.length);
+      for (const petId of lockedTeamPetIds) {
         get().addPetExp(petId, expPerPet);
       }
     }
@@ -692,26 +755,27 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const island = getIslandById(islandId);
     if (!island) return false;
 
-    const { collected, battleWins, discoveredItems, encounteredMonsters } = state.expedition;
+    const { collected, battleWins, discoveredItems, encounteredMonsters, lockedTeamPetIds, lockedTeamSnapshots, usedLuckyCharm } = state.expedition;
 
     get().addResources(collected);
 
     const totalExp = collected.find((r) => r.type === 'exp')?.amount || 0;
-    if (totalExp > 0 && state.team.length > 0) {
-      const expPerPet = Math.floor(totalExp / state.team.length);
-      for (const petId of state.team) {
+    if (totalExp > 0 && lockedTeamPetIds.length > 0) {
+      const expPerPet = Math.floor(totalExp / lockedTeamPetIds.length);
+      for (const petId of lockedTeamPetIds) {
         get().addPetExp(petId, expPerPet);
       }
     }
 
+    const recordId = randomId('adv');
     for (const discoveryId of discoveredItems) {
-      get().addDiscovery(discoveryId);
+      get().addDiscovery(discoveryId, recordId);
     }
 
     const currentProgress = state.islandProgress[islandId] || 0;
     const progressGain = Math.min(100 - currentProgress, 15 + battleWins * 5);
 
-    for (const petId of state.team) {
+    for (const petId of lockedTeamPetIds) {
       set((s) => ({
         pets: s.pets.map((p) =>
           p.id === petId
@@ -725,12 +789,47 @@ export const useGameStore = create<GameStore>((set, get) => ({
       }));
     }
 
+    const monsterSnapshots = encounteredMonsters.map((mId) => {
+      const tpl = MONSTER_TEMPLATES.find((m) => m.id === mId);
+      return { templateId: mId, name: tpl?.name || mId, emoji: tpl?.emoji || '👹', defeated: true };
+    });
+
+    const collectedSummary = collected
+      .filter((r) => r.type !== 'exp')
+      .map((r) => `${r.amount}${RESOURCE_NAMES[r.type] || r.type}`)
+      .join('、');
+
+    const teamNames = lockedTeamSnapshots.map((p) => `${p.emoji}${p.name}`).join('、');
+    const monsterPart = encounteredMonsters.length > 0 ? `，遭遇并击败了${encounteredMonsters.length}只怪物` : '';
+    const discoveryPart = discoveredItems.length > 0 ? '，还有了珍贵的发现！' : '';
+    const luckyPart = usedLuckyCharm ? '（使用了幸运符🍀）' : '';
+    const summary = `${teamNames}前往${island.emoji}${island.name}远征，采集了${collectedSummary}，获得了${totalExp}点经验${monsterPart}${discoveryPart}${luckyPart}`;
+
+    const record: AdventureRecord = {
+      id: recordId,
+      type: 'expedition',
+      startTime: state.expedition.startTime,
+      endTime: Date.now(),
+      islandId,
+      islandName: island.name,
+      islandEmoji: island.emoji,
+      teamPetIds: lockedTeamPetIds,
+      teamPetSnapshots: lockedTeamSnapshots,
+      collectedResources: collected,
+      encounteredMonsters: monsterSnapshots,
+      discoveries: discoveredItems,
+      expGained: totalExp,
+      usedLuckyCharm,
+      summary,
+    };
+
     set((s) => ({
       expedition: null,
       islandProgress: {
         ...s.islandProgress,
         [islandId]: currentProgress + progressGain,
       },
+      adventureRecords: [record, ...s.adventureRecords],
     }));
 
     const unlocked = get().checkAndUnlockIslands();
@@ -743,16 +842,12 @@ export const useGameStore = create<GameStore>((set, get) => ({
       });
     }
 
-    const collectedSummary = collected
-      .filter((r) => r.type !== 'exp')
-      .map((r) => `${r.amount}${r.type === 'gold' ? '金币' : r.type === 'ore' ? '矿石' : r.type === 'herb' ? '草药' : '贝壳'}`)
-      .join('、');
-
     get().addLog(
       `🏆 远征奖励已领取！${collectedSummary}，探索度 +${progressGain}%`,
       'success',
       discoveredItems[0],
-      islandId
+      islandId,
+      recordId
     );
 
     if (encounteredMonsters.length > 0) {
@@ -760,7 +855,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
         `⚔️ 本次远征共击败 ${battleWins} 只怪物`,
         'info',
         undefined,
-        islandId
+        islandId,
+        recordId
       );
     }
 
@@ -770,7 +866,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
           `✨ 发现了稀有物品！`,
           'success',
           dId,
-          islandId
+          islandId,
+          recordId
         );
       }
     }
@@ -787,11 +884,17 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const state = get();
     const workshopLevel = state.facilities.workshop;
     const baseAmount = randomInt(2, 6);
-    const bonus = Math.floor(workshopLevel * 0.5);
-    const amount = baseAmount + bonus;
+    const workshopBonus = Math.floor(workshopLevel * 0.5);
+    const toolBonus = get().getGatheringBonus(type);
+    const amount = baseAmount + workshopBonus + toolBonus;
 
     get().addResource(type, amount);
-    get().addLog(`采集到 ${amount} 个${type === 'ore' ? '矿石⛏️' : type === 'herb' ? '草药🌿' : '贝壳🐚'}`, 'success');
+
+    const typeLabel = type === 'ore' ? '矿石⛏️' : type === 'herb' ? '草药🌿' : '贝壳🐚';
+    const parts = [`基础${baseAmount}`];
+    if (workshopBonus > 0) parts.push(`工坊+${workshopBonus}`);
+    if (toolBonus > 0) parts.push(`工具+${toolBonus}`);
+    get().addLog(`采集到 ${amount} 个${typeLabel}（${parts.join('，')}）`, 'success');
     return amount;
   },
 
@@ -921,7 +1024,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
     get().addLog('📋 订单列表已刷新！', 'info');
   },
 
-  addLog: (message, type = 'info', relatedDiscoveryId, relatedIslandId) => {
+  addLog: (message, type = 'info', relatedDiscoveryId, relatedIslandId, relatedAdventureRecordId) => {
     const entry: LogEntry = {
       id: randomId('log'),
       timestamp: Date.now(),
@@ -929,13 +1032,14 @@ export const useGameStore = create<GameStore>((set, get) => ({
       type,
       relatedDiscoveryId,
       relatedIslandId,
+      relatedAdventureRecordId,
     };
     set((state) => ({
       logs: [entry, ...state.logs].slice(0, 100),
     }));
   },
 
-  addDiscovery: (discoveryId) => {
+  addDiscovery: (discoveryId, adventureRecordId) => {
     const state = get();
     if (state.discoveries.some((d) => d.id === discoveryId)) {
       return false;
@@ -944,8 +1048,12 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const discovery = createDiscovery(discoveryId);
     if (!discovery) return false;
 
+    const finalDiscovery = adventureRecordId
+      ? { ...discovery, adventureRecordId }
+      : discovery;
+
     set((s) => ({
-      discoveries: [...s.discoveries, discovery],
+      discoveries: [...s.discoveries, finalDiscovery],
     }));
 
     get().addLog(
@@ -956,21 +1064,33 @@ export const useGameStore = create<GameStore>((set, get) => ({
     return true;
   },
 
-  rollDiscoveryForIsland: (islandId) => {
+  rollDiscoveryForIsland: (islandId, hasLuckyCharm) => {
     const island = getIslandById(islandId);
     if (!island) return null;
 
     const roll = Math.random() * 100;
     let rarity: Rarity | null = null;
 
-    if (roll < 1) {
-      rarity = 'legendary';
-    } else if (roll < 6) {
-      rarity = 'epic';
-    } else if (roll < 21) {
-      rarity = 'rare';
-    } else if (roll < 51) {
-      rarity = 'common';
+    if (hasLuckyCharm) {
+      if (roll < 5) {
+        rarity = 'legendary';
+      } else if (roll < 20) {
+        rarity = 'epic';
+      } else if (roll < 40) {
+        rarity = 'rare';
+      } else if (roll < 80) {
+        rarity = 'common';
+      }
+    } else {
+      if (roll < 1) {
+        rarity = 'legendary';
+      } else if (roll < 6) {
+        rarity = 'epic';
+      } else if (roll < 21) {
+        rarity = 'rare';
+      } else if (roll < 51) {
+        rarity = 'common';
+      }
     }
 
     if (!rarity) return null;
@@ -1224,6 +1344,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
         equipment,
         inventory,
         lastOrderRefresh,
+        adventureRecords,
+        equippedTools,
       } = state;
       const saveData = {
         resources,
@@ -1239,11 +1361,123 @@ export const useGameStore = create<GameStore>((set, get) => ({
         equipment,
         inventory,
         lastOrderRefresh,
+        adventureRecords,
+        equippedTools,
       };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(saveData));
     } catch (e) {
       console.error('Failed to save game state:', e);
     }
+  },
+
+  addAdventureRecord: (record) => {
+    set((state) => ({
+      adventureRecords: [record, ...state.adventureRecords],
+    }));
+  },
+
+  getAdventureRecordById: (id) => {
+    return get().adventureRecords.find((r) => r.id === id);
+  },
+
+  equipTool: (slot, itemId) => {
+    const state = get();
+    const item = getItemById(itemId);
+    if (!item) return false;
+
+    const expectedSlot = TOOL_SLOT_MAP[itemId];
+    if (expectedSlot !== slot) return false;
+
+    const currentCount = state.inventory[itemId] || 0;
+    if (currentCount <= 0) return false;
+
+    const currentEquipped = state.equippedTools[slot];
+    if (currentEquipped) {
+      get().addItem(currentEquipped, 1);
+    }
+
+    get().removeItem(itemId, 1);
+
+    set((s) => ({
+      equippedTools: {
+        ...s.equippedTools,
+        [slot]: itemId,
+      },
+    }));
+
+    get().addLog(`装备了 ${item.emoji}${item.name} 到${slot === 'ore' ? '矿石' : slot === 'herb' ? '草药' : '贝壳'}采集位`, 'success');
+    return true;
+  },
+
+  unequipTool: (slot) => {
+    const state = get();
+    const equippedItemId = state.equippedTools[slot];
+    if (!equippedItemId) return;
+
+    const item = getItemById(equippedItemId);
+    get().addItem(equippedItemId, 1);
+
+    set((s) => ({
+      equippedTools: {
+        ...s.equippedTools,
+        [slot]: undefined,
+      },
+    }));
+
+    if (item) {
+      get().addLog(`卸下了 ${item.emoji}${item.name}`, 'info');
+    }
+  },
+
+  getGatheringBonus: (type) => {
+    const state = get();
+    const equippedItemId = state.equippedTools[type];
+    if (!equippedItemId) return 0;
+
+    const item = getItemById(equippedItemId);
+    if (!item || !item.effect || item.effect.type !== 'gatheringBonus') return 0;
+
+    return item.effect.value;
+  },
+
+  createBattleRecord: (params) => {
+    const recordId = randomId('adv');
+    const island = params.islandId ? getIslandById(params.islandId) : undefined;
+
+    const resourcesSummary = params.resources
+      .map((r) => `${r.amount}${RESOURCE_NAMES[r.type] || r.type}`)
+      .join('、');
+
+    const teamNames = params.teamPetSnapshots.map((p) => `${p.emoji}${p.name}`).join('、');
+    const monsterPart = params.monsters.length > 0
+      ? `，击败了${params.monsters.filter((m) => m.defeated).length}只怪物`
+      : '';
+    const discoveryPart = params.discoveries.length > 0 ? '，获得了珍贵发现' : '';
+    const luckyPart = params.usedLuckyCharm ? '（使用了幸运符🍀）' : '';
+    const islandPart = island ? `在${island.emoji}${island.name}` : '';
+    const summary = `${teamNames}${islandPart}进行了一场${params.difficulty === 'hard' ? '困难' : params.difficulty === 'normal' ? '普通' : '简单'}难度的战斗，获得了${resourcesSummary}和${params.expGained}点经验${monsterPart}${discoveryPart}${luckyPart}`;
+
+    const record: AdventureRecord = {
+      id: recordId,
+      type: 'battle',
+      startTime: Date.now(),
+      endTime: Date.now(),
+      islandId: params.islandId,
+      islandName: island?.name,
+      islandEmoji: island?.emoji,
+      difficulty: params.difficulty,
+      teamPetIds: params.teamPetIds,
+      teamPetSnapshots: params.teamPetSnapshots,
+      collectedResources: params.resources,
+      encounteredMonsters: params.monsters,
+      discoveries: params.discoveries,
+      expGained: params.expGained,
+      usedLuckyCharm: params.usedLuckyCharm,
+      summary,
+    };
+
+    get().addAdventureRecord(record);
+    return recordId;
   },
 }));
 

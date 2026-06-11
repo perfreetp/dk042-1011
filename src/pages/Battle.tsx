@@ -80,6 +80,7 @@ export default function Battle() {
   const [attackers, setAttackers] = useState<Set<string>>(new Set());
   const [showFlash, setShowFlash] = useState(false);
   const [hasFinalized, setHasFinalized] = useState(false);
+  const [battleRecordId, setBattleRecordId] = useState<string | undefined>(undefined);
 
   const logEndRef = useRef<HTMLDivElement>(null);
   const battleTimer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -209,7 +210,10 @@ export default function Battle() {
     if (isFinished && !hasFinalized) {
       setHasFinalized(true);
       setTimeout(() => {
-        finalizeBattle();
+        const result = finalizeBattle();
+        if (result?.battleRecordId) {
+          setBattleRecordId(result.battleRecordId);
+        }
       }, 500);
     }
   }, [isFinished, hasFinalized, finalizeBattle]);
@@ -226,6 +230,7 @@ export default function Battle() {
     resetBattle();
     setHasFinalized(false);
     setAutoBattle(false);
+    setBattleRecordId(undefined);
     initBattle(teamPets, monsterIds, config.levelMultiplier, selectedDifficulty);
 
     setTimeout(() => {
@@ -537,9 +542,16 @@ export default function Battle() {
 
           {isPlayerWin && (
             <div className="mb-6 md:mb-8">
-              <h3 className="font-title text-2xl md:text-3xl text-amber-300 mb-4">
-                🎁 战利品
-              </h3>
+              <div className="flex items-center justify-center gap-3 mb-4">
+                <h3 className="font-title text-2xl md:text-3xl text-amber-300">
+                  🎁 战利品
+                </h3>
+                {battleRecordId && (
+                  <span className="text-xs font-game text-emerald-300 bg-emerald-500/20 px-2.5 py-1 rounded-lg border border-emerald-400/30">
+                    📖 冒险记录已生成
+                  </span>
+                )}
+              </div>
 
               {rewards.resources.length > 0 && (
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4 max-w-2xl mx-auto">
@@ -589,17 +601,92 @@ export default function Battle() {
                       return (
                         <div
                           key={idx}
-                          className="flex items-center gap-2 px-3 py-2 rounded-lg bg-purple-500/20 border border-purple-400/30"
+                          className="flex flex-col items-center gap-1 px-3 py-2 rounded-lg bg-purple-500/20 border border-purple-400/30"
                         >
-                          <span className="text-xl">{discovery.emoji}</span>
-                          <div>
-                            <p className="text-white text-sm font-game">{discovery.name}</p>
-                            <p className="text-purple-300 text-xs font-game">[{discovery.rarity}]</p>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xl">{discovery.emoji}</span>
+                            <div>
+                              <p className="text-white text-sm font-game">{discovery.name}</p>
+                              <p className="text-purple-300 text-xs font-game">[{discovery.rarity}]</p>
+                            </div>
                           </div>
+                          <span className="text-[9px] font-game text-amber-300/80 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-400/20">
+                            来自本次战斗
+                          </span>
                         </div>
                       );
                     })}
                   </div>
+                </div>
+              )}
+
+              {battleRecordId && (
+                <div className="mt-4 p-4 rounded-xl bg-gradient-to-br from-emerald-500/15 to-teal-500/10 border border-emerald-400/30 max-w-2xl mx-auto text-left">
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="text-lg">📖</span>
+                    <h4 className="font-title text-lg text-emerald-300">冒险记录</h4>
+                  </div>
+
+                  <div className="space-y-2 text-sm font-game">
+                    <div className="flex items-center gap-2">
+                      <span className="text-white/60">难度：</span>
+                      <span className="text-white">
+                        {selectedDifficulty === 'easy' ? '🌱 简单' : selectedDifficulty === 'normal' ? '⚔️ 普通' : '💀 困难'}
+                      </span>
+                    </div>
+
+                    <div>
+                      <span className="text-white/60">击败怪物：</span>
+                      <div className="flex flex-wrap gap-1.5 mt-1">
+                        {battleState.enemyTeam.map((monster) => (
+                          <span
+                            key={monster.id}
+                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs ${
+                              monster.hp <= 0
+                                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/30'
+                                : 'bg-red-500/20 text-red-300 border border-red-400/30'
+                            }`}
+                          >
+                            {monster.emoji} {monster.name}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+
+                    {rewards.discoveries.length > 0 && (
+                      <div>
+                        <span className="text-white/60">发现物：</span>
+                        <div className="flex flex-wrap gap-1.5 mt-1">
+                          {rewards.discoveries.map((discoveryId, idx) => {
+                            const discovery = getDiscoveryById(discoveryId);
+                            if (!discovery) return null;
+                            return (
+                              <span
+                                key={idx}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-purple-500/20 text-purple-300 border border-purple-400/30"
+                              >
+                                {discovery.emoji} {discovery.name} [{discovery.rarity}]
+                              </span>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="flex items-center gap-2">
+                      <span className="text-white/60">经验分配：</span>
+                      <span className="text-sky-300">
+                        共 {rewards.exp} EXP → 每只宠物 +{expPerPet}
+                      </span>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => navigate('/collection?tab=adventures')}
+                    className="mt-3 w-full py-2 rounded-lg bg-emerald-500/20 border border-emerald-400/30 text-emerald-300 text-sm font-game hover:bg-emerald-500/30 transition-all"
+                  >
+                    📖 查看完整记录
+                  </button>
                 </div>
               )}
             </div>

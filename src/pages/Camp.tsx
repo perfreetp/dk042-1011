@@ -16,8 +16,10 @@ import {
 import { FACILITY_CONFIG, getUpgradeCost, getMaxFacilityLevel, getFacilityBonus } from '@/data/facilities';
 import { getIslandById } from '@/data/islands';
 import { ORDER_TEMPLATES } from '@/data/orders';
-import type { FacilityType, ResourceType, Order, LogEntry, ResourceReward } from '@/types';
+import type { FacilityType, ResourceType, Order, LogEntry, ResourceReward, AdventureRecord } from '@/types';
 import { useMemo, useState, useEffect, useRef } from 'react';
+import { getDiscoveryById } from '@/data/discoveries';
+import { MONSTER_TEMPLATES } from '@/data/monsters';
 
 const facilityEmojiMap: Record<FacilityType, string> = {
   dock: '⚓',
@@ -397,7 +399,7 @@ function ExpeditionIdlePanel({ lastExpedition }: { lastExpedition: LogEntry | nu
 }
 
 function ExpeditionProgressPanel() {
-  const { expedition, team, pets, updateExpeditionProgress } = useGameStore();
+  const { expedition, updateExpeditionProgress } = useGameStore();
   const [, forceUpdate] = useState(0);
   const hasCalledUpdateRef = useRef(false);
 
@@ -415,7 +417,6 @@ function ExpeditionProgressPanel() {
   const island = getIslandById(expedition.islandId);
   if (!island) return null;
 
-  const teamPets = pets.filter((p) => team.includes(p.id));
   const elapsed = Date.now() - expedition.startTime;
   const totalDuration = expedition.durationSeconds * 1000;
   const progress = Math.min(100, (elapsed / totalDuration) * 100);
@@ -481,22 +482,22 @@ function ExpeditionProgressPanel() {
           </div>
         </div>
 
-        {teamPets.length > 0 && (
+        {expedition.lockedTeamSnapshots.length > 0 && (
           <div className="mb-6">
             <div className="text-white/70 text-sm mb-3 flex items-center gap-1.5">
               <Sparkles size={14} className="text-amber-400" />
               出征队伍
             </div>
             <div className="flex flex-wrap gap-3">
-              {teamPets.map((pet) => (
+              {expedition.lockedTeamSnapshots.map((snapshot) => (
                 <div
-                  key={pet.id}
+                  key={snapshot.id}
                   className="flex items-center gap-3 px-4 py-2.5 rounded-xl bg-white/10 border border-white/10 hover:bg-white/15 transition-all duration-200"
                 >
-                  <span className="text-2xl md:text-3xl">{pet.emoji}</span>
+                  <span className="text-2xl md:text-3xl">{snapshot.emoji}</span>
                   <div>
-                    <div className="text-white text-sm font-bold">{pet.name}</div>
-                    <div className="text-white/50 text-xs">Lv.{pet.level}</div>
+                    <div className="text-white text-sm font-bold">{snapshot.name}</div>
+                    <div className="text-white/50 text-xs">Lv.{snapshot.level}</div>
                   </div>
                 </div>
               ))}
@@ -513,11 +514,18 @@ function ExpeditionProgressPanel() {
 }
 
 function ExpeditionRewardPanel() {
-  const { expedition, claimExpeditionRewards } = useGameStore();
+  const { expedition, claimExpeditionRewards, discoveries } = useGameStore();
   const [claimed, setClaimed] = useState(false);
   const [showRewards, setShowRewards] = useState(false);
   const rewardsRef = useRef<ResourceReward[]>([]);
   const discoveriesRef = useRef<string[]>([]);
+  const snapshotRef = useRef<{ id: string; name: string; emoji: string; level: number }[]>([]);
+  const islandRef = useRef<{ emoji: string; name: string } | null>(null);
+  const usedLuckyCharmRef = useRef(false);
+  const encounteredMonstersRef = useRef<{ templateId: string; name: string; emoji: string; defeated: boolean }[]>([]);
+  const claimTimeRef = useRef(0);
+  const expGainedRef = useRef(0);
+  const teamPetIdsRef = useRef<string[]>([]);
 
   if (!expedition || !expedition.rewardsReady) return null;
 
@@ -527,6 +535,16 @@ function ExpeditionRewardPanel() {
   const handleClaim = () => {
     rewardsRef.current = [...expedition.collected];
     discoveriesRef.current = [...expedition.discoveredItems];
+    snapshotRef.current = [...expedition.lockedTeamSnapshots];
+    islandRef.current = { emoji: island.emoji, name: island.name };
+    usedLuckyCharmRef.current = expedition.usedLuckyCharm;
+    encounteredMonstersRef.current = [...expedition.encounteredMonsters].map((mId) => {
+      const tpl = encounteredMonstersRef.current.find((m) => m.templateId === mId);
+      return tpl || { templateId: mId, name: mId, emoji: '👹', defeated: true };
+    });
+    claimTimeRef.current = Date.now();
+    expGainedRef.current = expedition.collected.find((r) => r.type === 'exp')?.amount || 0;
+    teamPetIdsRef.current = [...expedition.lockedTeamPetIds];
     const success = claimExpeditionRewards();
     if (success) {
       setClaimed(true);
@@ -535,6 +553,26 @@ function ExpeditionRewardPanel() {
   };
 
   if (claimed && showRewards) {
+    const discoveryDetails = discoveriesRef.current.map((dId) => {
+      const found = discoveries.find((d) => d.id === dId);
+      const template = getDiscoveryById(dId);
+      return found || template ? {
+        id: dId,
+        name: found?.name || template?.name || dId,
+        emoji: found?.emoji || template?.emoji || '✨',
+        rarity: found?.rarity || template?.rarity || 'common' as const,
+      } : null;
+    }).filter(Boolean);
+
+    const monsterDetails = [...expedition.encounteredMonsters].map((mId) => {
+      const tpl = MONSTER_TEMPLATES.find((m) => m.id === mId);
+      return { name: tpl?.name || mId, emoji: tpl?.emoji || '👹', defeated: true };
+    });
+
+    const expPerPet = teamPetIdsRef.current.length > 0
+      ? Math.floor(expGainedRef.current / teamPetIdsRef.current.length)
+      : 0;
+
     return (
       <div className="rounded-3xl p-6 md:p-8 border backdrop-blur-sm bg-gradient-to-br from-amber-500/20 to-yellow-500/20 border-amber-400/40 relative overflow-hidden">
         <div className="absolute inset-0 overflow-hidden pointer-events-none">
@@ -542,43 +580,118 @@ function ExpeditionRewardPanel() {
           <div className="absolute -bottom-32 -left-32 w-72 h-72 rounded-full bg-yellow-400/20 blur-3xl animate-pulse" />
         </div>
 
-        <div className="relative z-10 text-center">
-          <div className="text-6xl md:text-7xl mb-4 animate-bounce">🎉</div>
-          <h3 className="font-title text-2xl md:text-3xl text-amber-300 mb-2">奖励已领取！</h3>
-          <p className="text-white/70 mb-6">恭喜完成本次远征冒险</p>
+        <div className="relative z-10">
+          <div className="text-center mb-6">
+            <div className="text-6xl md:text-7xl mb-4 animate-bounce">🎉</div>
+            <h3 className="font-title text-2xl md:text-3xl text-amber-300 mb-2">🏝️ 远征冒险记录</h3>
+            <p className="text-white/70">恭喜完成本次远征冒险</p>
+          </div>
 
-          <div className="bg-black/20 rounded-2xl p-5 mb-6 border border-amber-400/20">
-            <div className="text-white/70 text-sm mb-4 flex items-center justify-center gap-2">
-              <Gift size={16} className="text-amber-400" />
-              获得奖励
-            </div>
-            <div className="flex flex-wrap justify-center gap-3">
-              {rewardsRef.current.map((reward, i) => (
-                <div
-                  key={i}
-                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-500/20 text-amber-200 border border-amber-400/30"
-                  style={{ animationDelay: `${i * 100}ms` }}
-                >
-                  <span className="text-xl">{RESOURCE_EMOJIS[reward.type]}</span>
-                  <span className="font-bold text-lg">+{formatNumberFull(reward.amount)}</span>
-                </div>
-              ))}
+          <div className="bg-black/20 rounded-2xl p-5 border border-amber-400/20 space-y-4 mb-6">
+            <div className="flex items-center gap-3 pb-4 border-b border-white/10">
+              <span className="text-3xl">{islandRef.current?.emoji}</span>
+              <div>
+                <div className="text-white/50 text-xs">出发岛屿</div>
+                <div className="text-white font-bold">{islandRef.current?.name}</div>
+              </div>
             </div>
 
-            {discoveriesRef.current.length > 0 && (
-              <div className="mt-5 pt-5 border-t border-white/10">
-                <div className="text-white/70 text-sm mb-3 flex items-center justify-center gap-2">
-                  <Sparkles size={16} className="text-purple-400" />
-                  新发现
-                </div>
-                <div className="flex flex-wrap justify-center gap-3">
-                  {discoveriesRef.current.map((_, i) => (
+            <div className="pb-4 border-b border-white/10">
+              <div className="text-white/50 text-xs mb-2">出发队伍</div>
+              <div className="flex flex-wrap gap-3">
+                {snapshotRef.current.map((pet) => (
+                  <div key={pet.id} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/10 border border-white/10">
+                    <span className="text-xl">{pet.emoji}</span>
+                    <span className="text-white font-bold text-sm">{pet.name}</span>
+                    <span className="text-white/50 text-xs">Lv.{pet.level}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="pb-4 border-b border-white/10">
+              <div className="text-white/50 text-xs mb-2">采集资源</div>
+              <div className="flex flex-wrap gap-2">
+                {rewardsRef.current.filter((r) => r.type !== 'exp').map((reward, i) => (
+                  <div
+                    key={i}
+                    className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber-500/20 text-amber-200 border border-amber-400/30"
+                  >
+                    <span className="text-lg">{RESOURCE_EMOJIS[reward.type]}</span>
+                    <span className="font-bold">+{formatNumberFull(reward.amount)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {monsterDetails.length > 0 && (
+              <div className="pb-4 border-b border-white/10">
+                <div className="text-white/50 text-xs mb-2">遭遇怪物</div>
+                <div className="flex flex-wrap gap-2">
+                  {monsterDetails.map((m, i) => (
                     <div
                       key={i}
-                      className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-purple-500/20 text-purple-200 border border-purple-400/30"
+                      className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-red-500/20 text-red-200 border border-red-400/30"
                     >
-                      <span className="text-xl">✨</span>
-                      <span className="font-bold">稀有发现</span>
+                      <span className="text-lg">{m.emoji}</span>
+                      <span className="font-bold text-sm">{m.name}</span>
+                      <span className="text-emerald-400">✅击败</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="pb-4 border-b border-white/10">
+              <div className="text-white/50 text-xs mb-2">新发现</div>
+              {discoveryDetails.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {discoveryDetails.map((d) => d && (
+                    <div
+                      key={d.id}
+                      className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-purple-500/20 border border-purple-400/30"
+                    >
+                      <span className="text-lg">{d.emoji}</span>
+                      <span className={cn('font-bold text-sm', RARITY_COLORS[d.rarity])}>{d.name}</span>
+                      <span className={cn(
+                        'text-xs px-1.5 py-0.5 rounded-full',
+                        RARITY_COLORS[d.rarity],
+                        'bg-white/10'
+                      )}>
+                        {RARITY_NAMES[d.rarity]}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <span className="text-white/40 text-sm">无</span>
+              )}
+            </div>
+
+            {usedLuckyCharmRef.current && (
+              <div className="pb-4 border-b border-white/10">
+                <div className="flex items-center gap-2 text-emerald-300">
+                  <span className="text-lg">🍀</span>
+                  <span className="text-sm">使用了幸运符</span>
+                </div>
+              </div>
+            )}
+
+            <div className="pb-4 border-b border-white/10">
+              <div className="text-white/50 text-xs mb-1">领取时间</div>
+              <div className="text-white/80 text-sm">
+                {new Date(claimTimeRef.current).toLocaleString('zh-CN')}
+              </div>
+            </div>
+
+            {expGainedRef.current > 0 && (
+              <div>
+                <div className="text-white/50 text-xs mb-2">经验分配</div>
+                <div className="space-y-1">
+                  {snapshotRef.current.map((pet) => (
+                    <div key={pet.id} className="flex items-center justify-between text-sm">
+                      <span className="text-white/80">{pet.emoji} {pet.name}</span>
+                      <span className="text-cyan-300 font-bold">+{expPerPet} EXP</span>
                     </div>
                   ))}
                 </div>
@@ -586,7 +699,7 @@ function ExpeditionRewardPanel() {
             )}
           </div>
 
-          <div className="text-white/50 text-sm">
+          <div className="text-center text-white/50 text-sm">
             远征队已安全返回码头营地
           </div>
         </div>
@@ -760,6 +873,11 @@ function LogPanel() {
                           ✨ 新发现
                         </span>
                       )}
+                      {log.relatedAdventureRecordId && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-amber-500/30 text-amber-300 border border-amber-400/30">
+                          📖 冒险记录
+                        </span>
+                      )}
                     </div>
                   </div>
                   <div className="text-white/40 text-xs font-mono flex-shrink-0 mt-0.5">
@@ -851,6 +969,186 @@ function WelcomeBanner() {
   );
 }
 
+function AdventureRecordDetailModal({ record, onClose }: { record: AdventureRecord; onClose: () => void }) {
+  const { discoveries } = useGameStore();
+
+  const discoveryDetails = record.discoveries.map((dId) => {
+    const found = discoveries.find((d) => d.id === dId);
+    const template = getDiscoveryById(dId);
+    return found || template ? {
+      id: dId,
+      name: found?.name || template?.name || dId,
+      emoji: found?.emoji || template?.emoji || '✨',
+      rarity: found?.rarity || template?.rarity || 'common' as const,
+    } : null;
+  }).filter(Boolean);
+
+  const expPerPet = record.teamPetSnapshots.length > 0
+    ? Math.floor(record.expGained / record.teamPetSnapshots.length)
+    : 0;
+
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="glass-card rounded-2xl max-w-lg w-full p-6 card-shadow max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between mb-5">
+          <h3 className="font-title text-xl md:text-2xl text-amber-300">🏝️ 远征冒险记录</h3>
+          <button onClick={onClose} className="text-white/60 hover:text-white text-2xl transition-colors w-8 h-8 flex items-center justify-center rounded-lg hover:bg-white/10">✕</button>
+        </div>
+
+        <div className="space-y-4">
+          <div className="flex items-center gap-3 pb-3 border-b border-white/10">
+            <span className="text-3xl">{record.islandEmoji || '🏝️'}</span>
+            <div>
+              <div className="text-white/50 text-xs">出发岛屿</div>
+              <div className="text-white font-bold">{record.islandName || '未知'}</div>
+            </div>
+          </div>
+
+          <div className="pb-3 border-b border-white/10">
+            <div className="text-white/50 text-xs mb-2">出发队伍</div>
+            <div className="flex flex-wrap gap-2">
+              {record.teamPetSnapshots.map((pet) => (
+                <div key={pet.id} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/10 border border-white/10">
+                  <span className="text-lg">{pet.emoji}</span>
+                  <span className="text-white font-bold text-sm">{pet.name}</span>
+                  <span className="text-white/50 text-xs">Lv.{pet.level}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="pb-3 border-b border-white/10">
+            <div className="text-white/50 text-xs mb-2">采集资源</div>
+            <div className="flex flex-wrap gap-2">
+              {record.collectedResources.filter((r) => r.type !== 'exp').map((reward, i) => (
+                <div key={i} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber-500/20 text-amber-200 border border-amber-400/30">
+                  <span>{RESOURCE_EMOJIS[reward.type]}</span>
+                  <span className="font-bold">+{formatNumberFull(reward.amount)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {record.encounteredMonsters.length > 0 && (
+            <div className="pb-3 border-b border-white/10">
+              <div className="text-white/50 text-xs mb-2">遭遇怪物</div>
+              <div className="flex flex-wrap gap-2">
+                {record.encounteredMonsters.map((m, i) => (
+                  <div key={i} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-red-500/20 text-red-200 border border-red-400/30">
+                    <span>{m.emoji}</span>
+                    <span className="font-bold text-sm">{m.name}</span>
+                    {m.defeated && <span className="text-emerald-400">✅击败</span>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="pb-3 border-b border-white/10">
+            <div className="text-white/50 text-xs mb-2">新发现</div>
+            {discoveryDetails.length > 0 ? (
+              <div className="flex flex-wrap gap-2">
+                {discoveryDetails.map((d) => d && (
+                  <div key={d.id} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-purple-500/20 border border-purple-400/30">
+                    <span>{d.emoji}</span>
+                    <span className={cn('font-bold text-sm', RARITY_COLORS[d.rarity])}>{d.name}</span>
+                    <span className={cn('text-xs px-1.5 py-0.5 rounded-full', RARITY_COLORS[d.rarity], 'bg-white/10')}>
+                      {RARITY_NAMES[d.rarity]}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <span className="text-white/40 text-sm">无</span>
+            )}
+          </div>
+
+          {record.usedLuckyCharm && (
+            <div className="pb-3 border-b border-white/10">
+              <div className="flex items-center gap-2 text-emerald-300">
+                <span>🍀</span>
+                <span className="text-sm">使用了幸运符</span>
+              </div>
+            </div>
+          )}
+
+          <div className="pb-3 border-b border-white/10">
+            <div className="text-white/50 text-xs mb-1">完成时间</div>
+            <div className="text-white/80 text-sm">{new Date(record.endTime).toLocaleString('zh-CN')}</div>
+          </div>
+
+          {record.expGained > 0 && (
+            <div>
+              <div className="text-white/50 text-xs mb-2">经验分配</div>
+              <div className="space-y-1">
+                {record.teamPetSnapshots.map((pet) => (
+                  <div key={pet.id} className="flex items-center justify-between text-sm">
+                    <span className="text-white/80">{pet.emoji} {pet.name}</span>
+                    <span className="text-cyan-300 font-bold">+{expPerPet} EXP</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AdventureRecordHistory() {
+  const { adventureRecords } = useGameStore();
+  const [selectedRecord, setSelectedRecord] = useState<AdventureRecord | null>(null);
+
+  if (adventureRecords.length === 0) return null;
+
+  return (
+    <div>
+      <div className="flex items-center gap-3 mb-5">
+        <div className="w-1.5 h-8 bg-gradient-to-b from-purple-400 to-amber-400 rounded-full" />
+        <h2 className="font-title text-2xl md:text-3xl text-white drop-shadow">📖 冒险记录</h2>
+        <div className="flex-1 h-px bg-gradient-to-r from-white/30 to-transparent" />
+        <span className="text-white/40 text-sm">共 {adventureRecords.length} 条</span>
+      </div>
+
+      <div className="flex gap-4 overflow-x-auto pb-3 custom-scrollbar snap-x snap-mandatory">
+        {adventureRecords.slice(0, 20).map((record) => {
+          const typeEmoji = record.type === 'expedition' ? '🚢' : '⚔️';
+          const dateStr = new Date(record.endTime).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
+          return (
+            <button
+              key={record.id}
+              onClick={() => setSelectedRecord(record)}
+              className="flex-shrink-0 snap-start w-48 rounded-2xl p-4 border backdrop-blur-sm transition-all duration-300 hover:scale-[1.03] hover:shadow-xl bg-gradient-to-br from-slate-600/30 to-slate-800/30 border-white/10 hover:border-amber-400/40 text-left"
+            >
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-xl">{typeEmoji}</span>
+                <span className="text-white font-bold text-sm truncate">
+                  {record.islandName || (record.type === 'battle' ? `难度 ${record.difficulty}` : '未知')}
+                </span>
+              </div>
+              <div className="flex items-center gap-2 text-white/50 text-xs mb-2">
+                <Calendar size={12} />
+                <span>{dateStr}</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-white/60 text-xs">发现:</span>
+                <span className={cn('text-xs font-bold', record.discoveries.length > 0 ? 'text-purple-300' : 'text-white/40')}>
+                  {record.discoveries.length}
+                </span>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      {selectedRecord && (
+        <AdventureRecordDetailModal record={selectedRecord} onClose={() => setSelectedRecord(null)} />
+      )}
+    </div>
+  );
+}
+
 export default function Camp() {
   return (
     <div className="page-enter container mx-auto px-4 py-8 pb-16">
@@ -866,6 +1164,10 @@ export default function Camp() {
 
       <div className="mb-10">
         <OrderBoard />
+      </div>
+
+      <div className="mb-10">
+        <AdventureRecordHistory />
       </div>
 
       <div>

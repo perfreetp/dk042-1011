@@ -19,7 +19,7 @@ export interface Item {
   description: string;
   type: ItemType;
   effect?: {
-    type: 'heal' | 'hatchBoost' | 'moodBoost' | 'staminaBoost';
+    type: 'heal' | 'hatchBoost' | 'moodBoost' | 'staminaBoost' | 'gatheringBonus' | 'discoveryBoost';
     value: number;
   };
   rarity: Rarity;
@@ -134,6 +134,25 @@ export interface Order {
   createdAt: number;
 }
 
+export interface AdventureRecord {
+  id: string;
+  type: 'expedition' | 'battle';
+  startTime: number;
+  endTime: number;
+  islandId?: string;
+  islandName?: string;
+  islandEmoji?: string;
+  difficulty?: 'easy' | 'normal' | 'hard';
+  teamPetIds: string[];
+  teamPetSnapshots: { id: string; name: string; emoji: string; level: number }[];
+  collectedResources: ResourceReward[];
+  encounteredMonsters: { templateId: string; name: string; emoji: string; defeated: boolean }[];
+  discoveries: string[];
+  expGained: number;
+  usedLuckyCharm: boolean;
+  summary: string;
+}
+
 export interface Expedition {
   islandId: string;
   startTime: number;
@@ -146,6 +165,10 @@ export interface Expedition {
   discoveredItems: string[];
   encounteredMonsters: string[];
   battleLog: string[];
+  lockedTeamPetIds: string[];
+  lockedTeamSnapshots: { id: string; name: string; emoji: string; level: number }[];
+  usedLuckyCharm: boolean;
+  adventureRecordId?: string;
 }
 
 export interface Discovery {
@@ -157,6 +180,7 @@ export interface Discovery {
   description: string;
   foundAt: number;
   referenceId?: string;
+  adventureRecordId?: string;
 }
 
 export interface LogEntry {
@@ -166,6 +190,7 @@ export interface LogEntry {
   type: 'info' | 'success' | 'warning' | 'danger';
   relatedDiscoveryId?: string;
   relatedIslandId?: string;
+  relatedAdventureRecordId?: string;
 }
 
 export interface Recipe {
@@ -245,4 +270,6 @@ export interface GameState {
   equipment: Equipment[];
   inventory: Record<string, number>;
   lastOrderRefresh: number;
+  adventureRecords: AdventureRecord[];
+  equippedTools: { ore?: string; herb?: string; shell?: string };
 }
